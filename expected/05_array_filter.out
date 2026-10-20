@@ -1,0 +1,60 @@
+SELECT array_filter(ARRAY[1, 3, 2, 3, 4], 'x % 3 = 1');
+ array_filter 
+--------------
+ {1,4}
+(1 row)
+
+SELECT array_filter(ARRAY[1, 3, 2, 3, 4], 'x > 2');
+ array_filter 
+--------------
+ {3,3,4}
+(1 row)
+
+SELECT array_filter(ARRAY[1, 3, 2, 3, 4], 'x % 10 = 8');
+ array_filter 
+--------------
+ {}
+(1 row)
+
+SELECT array_filter(ARRAY[1, 3, 2, 3, 4], 'x > 12');
+ array_filter 
+--------------
+ {}
+(1 row)
+
+SELECT array_filter(ARRAY['foo', 'bar', 'baz'], 'x == "foo"');
+ array_filter 
+--------------
+ {foo}
+(1 row)
+
+SELECT array_filter(ARRAY['foo', 'bar', 'baz'], 'x == "foobar"');
+ array_filter 
+--------------
+ {}
+(1 row)
+
+SELECT array_filter(ARRAY[]::integer[], 'x % 3 = 1');
+ array_filter 
+--------------
+ {}
+(1 row)
+
+SELECT array_filter(NULL::integer[], 'x % 3 = 1');
+ array_filter 
+--------------
+ 
+(1 row)
+
+SELECT array_filter(ARRAY[1, 2, 3], NULL);
+ array_filter 
+--------------
+ 
+(1 row)
+
+SELECT array_filter(ARRAY[1, 3, 2, 3, 4], 'x + 3 = 1');
+ERROR:  unsupported predicate
+SELECT array_filter(ARRAY[1.2, 3.4], 'x % 4 = 1');
+ERROR:  unsupported predicate
+SELECT array_filter(ARRAY['foo', 'bar'], 'x > 4');
+ERROR:  unsupported predicate

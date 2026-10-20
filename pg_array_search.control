@@ -1,0 +1,4 @@
+comment = 'A set of functions for searching, indexing, and filtering within arrays'
+default_version = '1.0'
+module_pathname = '$libdir/pg_array_search'
+relocatable = true

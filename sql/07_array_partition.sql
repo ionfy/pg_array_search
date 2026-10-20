@@ -1,0 +1,12 @@
+SELECT array_partition(ARRAY[1, 3, 2, 3, 4], 'x % 3 = 1');
+SELECT array_partition(ARRAY[1, 3, 2, 3, 4], 'x > 2');
+SELECT array_partition(ARRAY[1, 3, 2, 3, 4], 'x % 10 = 8');
+SELECT array_partition(ARRAY[1, 3, 2, 3, 4], 'x > 12');
+SELECT array_partition(ARRAY['foo', 'bar', 'baz'], 'x == "foo"');
+SELECT array_partition(ARRAY['foo', 'bar', 'baz'], 'x == "foobar"');
+SELECT array_partition(ARRAY[]::integer[], 'x % 3 = 1');
+SELECT array_partition(NULL::integer[], 'x % 3 = 1');
+SELECT array_partition(ARRAY[1, 2, 3], NULL);
+SELECT array_partition(ARRAY[1, 3, 2, 3, 4], 'x + 3 = 1');
+SELECT array_partition(ARRAY[1.2, 3.4], 'x % 4 = 1');
+SELECT array_partition(ARRAY['foo', 'bar'], 'x > 4');
