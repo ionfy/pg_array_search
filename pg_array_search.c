@@ -34,11 +34,12 @@ typedef enum {
 
 typedef struct {
     predicate_op op;
+    Oid obj_type;
     Datum obj1;
     Datum obj2;
 } predicate;
 
-int32 compare(Oid type, Datum obj1, Datum obj2, Oid collation)
+static int32 compare(Oid type, Datum obj1, Datum obj2, Oid collation)
 {
     int32 cmp;
 
@@ -87,7 +88,8 @@ int32 compare(Oid type, Datum obj1, Datum obj2, Oid collation)
     return cmp;
 }
 
-Datum parse_item(const char *data, int len, int* pos, Oid item_type) {
+static Datum parse_item(const char *data, int len, int* pos, Oid item_type)
+{
     int item_len = 0;
     Datum item;
     bool is_float = 0;
@@ -118,6 +120,8 @@ Datum parse_item(const char *data, int len, int* pos, Oid item_type) {
         case BPCHAROID:
             item = DirectFunctionCall3(bpcharin, CStringGetDatum(buf), ObjectIdGetDatum(BPCHAROID), Int32GetDatum(-1));
             break;
+        default:
+            ereport(ERROR, errmsg("unsupported type for constant"));
         }
 
         (*pos) += item_len + 1;
@@ -177,6 +181,8 @@ Datum parse_item(const char *data, int len, int* pos, Oid item_type) {
             case NUMERICOID: 
                 item = DirectFunctionCall3(numeric_in, CStringGetDatum(buf), ObjectIdGetDatum(NUMERICOID), Int32GetDatum(-1));
                 break;
+            default:
+                ereport(ERROR, errmsg("unsupported type for constant"));
             }
 
         (*pos) += item_len;
@@ -187,7 +193,7 @@ Datum parse_item(const char *data, int len, int* pos, Oid item_type) {
     return item;
 }
 
-predicate_op parse_operation(const char *data, int len, int* pos)
+static predicate_op parse_operation(const char *data, int len, int* pos)
 {
     if ((*pos) >= len)
     {
@@ -233,10 +239,13 @@ predicate_op parse_operation(const char *data, int len, int* pos)
     return NONE_OP;
 }
 
-predicate parse_predicate(const char *data, int len, Oid item_type)
+static predicate parse_predicate(const char *data, int len, Oid item_type)
 {
     predicate pred;
+    bool any_val = 0;
     int pos = 0;
+
+    pred.obj_type = item_type;
 
     if (len == 0)
     {
@@ -245,7 +254,13 @@ predicate parse_predicate(const char *data, int len, Oid item_type)
     }
 
     while (pos < len && data[pos] >= 'a' && data[pos] <= 'z')
+    {
+        any_val = 1;
         pos++;
+    }
+
+    if (!any_val)
+        ereport(ERROR, errmsg("unsupported predicate"));
 
     while (pos < len && data[pos] == ' ')
         pos++;
@@ -299,8 +314,11 @@ predicate parse_predicate(const char *data, int len, Oid item_type)
     return pred;
 }
 
-bool process_predicate(Datum obj, Oid obj_type, predicate pred, Oid collation)
+static bool process_predicate(Datum obj, Oid obj_type, predicate pred, Oid collation)
 {
+    if (pred.obj_type != obj_type)
+        ereport(ERROR, errmsg("predicate type does not match element type"));
+
     switch (pred.op)
     {
     case EQ_OP:
@@ -322,16 +340,16 @@ bool process_predicate(Datum obj, Oid obj_type, predicate pred, Oid collation)
         {
         case INT2OID:
             if (DatumGetInt16(pred.obj1) == 0)
-                ereport(ERROR, errmsg("division by 0"));
-            return compare(obj_type, DatumGetInt16(obj) % DatumGetInt16(pred.obj1), pred.obj2, collation) == 0;
+                ereport(ERROR, errmsg("division by zero"));
+            return compare(obj_type, Int16GetDatum(DatumGetInt16(obj) % DatumGetInt16(pred.obj1)), pred.obj2, collation) == 0;
         case INT4OID:
             if (DatumGetInt32(pred.obj1) == 0)
-                ereport(ERROR, errmsg("division by 0"));
-            return compare(obj_type, DatumGetInt32(obj) % DatumGetInt32(pred.obj1), pred.obj2, collation) == 0;
+                ereport(ERROR, errmsg("division by zero"));
+            return compare(obj_type, Int32GetDatum(DatumGetInt32(obj) % DatumGetInt32(pred.obj1)), pred.obj2, collation) == 0;
         case INT8OID:
             if (DatumGetInt64(pred.obj1) == 0)
-                ereport(ERROR, errmsg("division by 0"));
-            return compare(obj_type, DatumGetInt64(obj) % DatumGetInt64(pred.obj1), pred.obj2, collation) == 0;
+                ereport(ERROR, errmsg("division by zero"));
+            return compare(obj_type, Int64GetDatum(DatumGetInt64(obj) % DatumGetInt64(pred.obj1)), pred.obj2, collation) == 0;
         default:
             ereport(ERROR, errmsg("unsupported operation"));
         }
@@ -423,9 +441,6 @@ array_contains_all(PG_FUNCTION_ARGS)
 
     array = PG_GETARG_ARRAYTYPE_P(0);
     searched_array = PG_GETARG_ARRAYTYPE_P(1);
-
-    if (ARR_ELEMTYPE(array) != ARR_ELEMTYPE(searched_array))
-        ereport(ERROR, errmsg("array types must match"));
 
     elem_type = ARR_ELEMTYPE(searched_array);
 
@@ -521,8 +536,6 @@ array_find_all(PG_FUNCTION_ARGS)
 
     if (n == 0)
     {
-        pfree(vals);
-        pfree(nulls);
         PG_RETURN_ARRAYTYPE_P(construct_empty_array(INT4OID));
     }
 
@@ -616,8 +629,6 @@ array_filter(PG_FUNCTION_ARGS)
 
     if (n == 0)
     {
-        pfree(vals);
-        pfree(nulls);
         PG_RETURN_ARRAYTYPE_P(construct_empty_array(elem_type));
     }
     
@@ -692,8 +703,6 @@ array_reject(PG_FUNCTION_ARGS)
 
     if (n == 0)
     {
-        pfree(vals);
-        pfree(nulls);
         PG_RETURN_ARRAYTYPE_P(construct_empty_array(elem_type));
     }
     
@@ -773,8 +782,6 @@ array_partition(PG_FUNCTION_ARGS)
 
     if (n == 0)
     {
-        pfree(vals);
-        pfree(nulls);
         PG_RETURN_ARRAYTYPE_P(construct_empty_array(elem_type));
     }
     
@@ -940,7 +947,7 @@ array_last_index_of(PG_FUNCTION_ARGS)
 
     if (PG_ARGISNULL(1))
 	{
-	    for (i = 0; i < n; i++)
+	    for (i = n - 1; i >= 0; i--)
 			if (nulls[i])
             {
                 pfree(vals);
