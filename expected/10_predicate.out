@@ -28,9 +28,31 @@ SELECT array_filter(ARRAY[1, 2, 3], 'x % 0 = 1');
 ERROR:  predicate: division by zero
 SELECT array_filter(ARRAY[1, 2, 3], '2');
 ERROR:  predicate: expected name
+SELECT array_filter(ARRAY[1, 2, 3], 'x ! 2');
+ERROR:  predicate: unsupported operation
+SELECT array_filter(ARRAY[1, 2, 3], 'a % 2 = ');
+ERROR:  predicate: expected second constant
 SELECT array_filter(ARRAY[1, 2, 3], '              x               ==                2          ');
  array_filter 
 --------------
  {2}
+(1 row)
+
+SELECT array_filter(ARRAY[1, 2, 3], '      ');
+ array_filter 
+--------------
+ {1,2,3}
+(1 row)
+
+SELECT array_filter(ARRAY[1, 2, 3], 'x = 2');
+ array_filter 
+--------------
+ {2}
+(1 row)
+
+SELECT array_filter(ARRAY[1, 2, 3], 'x % 2 = 1');
+ array_filter 
+--------------
+ {1,3}
 (1 row)
 
