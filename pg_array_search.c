@@ -93,18 +93,26 @@ static Datum parse_item(const char *data, int len, int* pos, Oid item_type)
     int item_len = 0;
     Datum item;
     bool is_float = 0;
+    char* buf;
+
     if (data[(*pos)] == '"')
     {
         if (!(item_type == TEXTOID || item_type == VARCHAROID || item_type == BPCHAROID))
+        {
             ereport(ERROR, errmsg("incompatible types for comparison"));
+        }
         
         (*pos)++;
         while ((*pos) + item_len < len && data[(*pos) + item_len] != '"')
-            item_len++;
+	    {
+		    item_len++;
+	    }
         if ((*pos) + item_len >= len)
+        {
             ereport(ERROR, errmsg("unsupported predicate"));
+        }
 
-        char* buf = palloc((item_len+1)*sizeof(char));
+        buf = palloc((item_len+1)*sizeof(char));
         memcpy(buf, data + (*pos), item_len*sizeof(char));
         buf[item_len] = '\0';
 
@@ -132,12 +140,17 @@ static Datum parse_item(const char *data, int len, int* pos, Oid item_type)
     {
         if (!(item_type == INT2OID || item_type == INT4OID || item_type == INT8OID ||
             item_type == FLOAT4OID || item_type == FLOAT8OID || item_type == NUMERICOID))
+        {
             ereport(ERROR, errmsg("incompatible types for comparison"));
+        }
         
         if ((*pos) + item_len < len && data[(*pos) + item_len] == '-')
+        {
             item_len++;
+        }
         
-        while ((*pos) + item_len < len && ((data[(*pos) + item_len] >= '0' && data[(*pos) + item_len] <= '9') ||
+        while ((*pos) + item_len < len &&
+            ((data[(*pos) + item_len] >= '0' && data[(*pos) + item_len] <= '9') ||
             data[(*pos) + item_len] == '.'))
         {
             if (data[(*pos) + item_len] == '.')
@@ -149,15 +162,21 @@ static Datum parse_item(const char *data, int len, int* pos, Oid item_type)
         }
 
         if (item_len == 0)
+        {
             ereport(ERROR, errmsg("unsupported predicate"));
+        }
 
         if (item_len == 1 && data[(*pos)] == '-')
+        {
             ereport(ERROR, errmsg("unsupported predicate"));
+        }
 
         if (is_float && (item_type == INT2OID || item_type == INT4OID || item_type == INT8OID))
+        {
             ereport(ERROR, errmsg("incompatible types for comparison"));
+        }
 
-        char* buf = palloc((item_len+1)*sizeof(char));
+        buf = palloc((item_len+1)*sizeof(char));
         memcpy(buf, data + (*pos), item_len*sizeof(char));
         buf[item_len] = '\0';
 
@@ -197,7 +216,7 @@ static predicate_op parse_operation(const char *data, int len, int* pos)
 {
     if ((*pos) >= len)
     {
-        return NONE_OP;
+        ereport(ERROR, errmsg("unsupported predicate"));
     }
     switch (data[(*pos)])
     {
@@ -207,13 +226,12 @@ static predicate_op parse_operation(const char *data, int len, int* pos)
         (*pos)++;
         return EQ_OP;
     case '!':
-        if ((*pos) + 1 < len && data[(*pos) + 1] == '=')
+        if (!((*pos) + 1 >= len && data[(*pos) + 1] == '='))
         {
-            (*pos)+=2;
-            return N_EQ_OP;
+            ereport(ERROR, errmsg("unsupported predicate"));
         }
-        (*pos)++;
-        ereport(ERROR, errmsg("unsupported predicate"));
+        (*pos)+=2;
+        return N_EQ_OP;
     case '>':
         if ((*pos) + 1 < len && data[(*pos) + 1] == '=')
         {
@@ -236,7 +254,7 @@ static predicate_op parse_operation(const char *data, int len, int* pos)
     default:
         ereport(ERROR, errmsg("unsupported predicate"));
     }
-    return NONE_OP;
+    ereport(ERROR, errmsg("unsupported predicate"));
 }
 
 static predicate parse_predicate(const char *data, int len, Oid item_type)
@@ -260,56 +278,88 @@ static predicate parse_predicate(const char *data, int len, Oid item_type)
     }
 
     if (!any_val)
+    {
         ereport(ERROR, errmsg("unsupported predicate"));
+    }
 
     while (pos < len && data[pos] == ' ')
+    {
         pos++;
+    }
     if (pos >= len)
+    {
         ereport(ERROR, errmsg("unsupported predicate"));
+    }
 
     pred.op = parse_operation(data, len, &pos);
 
     if ((item_type == TEXTOID || item_type == VARCHAROID || item_type == BPCHAROID) &&
         !(pred.op == EQ_OP || pred.op == N_EQ_OP))
+    {
         ereport(ERROR, errmsg("unsupported predicate"));
+    }
     
     if (pred.op == MOD_OP &&
         !(item_type == INT2OID || item_type == INT4OID || item_type == INT8OID))
+    {
         ereport(ERROR, errmsg("unsupported predicate"));
+    }
 
 
     while (pos < len && data[pos] == ' ')
+    {
         pos++;
+    }
     if (pos >= len)
+    {
         ereport(ERROR, errmsg("unsupported predicate"));
+    }
 
     pred.obj1 = parse_item(data, len, &pos, item_type);
     
     while (pos < len && data[pos] == ' ')
+    {
         pos++;
+    }
 
     if (pos >= len)
+    {
         if (pred.op != MOD_OP)
+        {
             return pred;
+        }
         else
+        {
             ereport(ERROR, errmsg("unsupported predicate"));
+        }
+    }
     
     if (pred.op != MOD_OP || data[pos] != '=')
+    {
         ereport(ERROR, errmsg("unsupported predicate"));
+    }
 
     pos++;
 
     while (pos < len && data[pos] == ' ')
+    {
         pos++;
+    }
     if (pos >= len)
+    {
         ereport(ERROR, errmsg("unsupported predicate"));
+    }
 
     pred.obj2 = parse_item(data, len, &pos, item_type);
 
     while (pos < len && data[pos] == ' ')
+    {
         pos++;
+    }
     if (pos < len)
+    {
         ereport(ERROR, errmsg("unsupported predicate"));
+    }
 
     return pred;
 }
@@ -317,7 +367,9 @@ static predicate parse_predicate(const char *data, int len, Oid item_type)
 static bool process_predicate(Datum obj, Oid obj_type, predicate pred, Oid collation)
 {
     if (pred.obj_type != obj_type)
+    {
         ereport(ERROR, errmsg("predicate type does not match element type"));
+    }
 
     switch (pred.op)
     {
@@ -357,7 +409,7 @@ static bool process_predicate(Datum obj, Oid obj_type, predicate pred, Oid colla
     default:
         ereport(ERROR, errmsg("unsupported operation"));
     }
-    return 0;
+    ereport(ERROR, errmsg("unsupported operation"));
 }
 
 Datum
@@ -375,7 +427,9 @@ array_contains(PG_FUNCTION_ARGS)
     int             n, i;
 
     if (PG_ARGISNULL(0))
+    {
         PG_RETURN_NULL();
+    }
 
     array = PG_GETARG_ARRAYTYPE_P(0);
 	elem_type = ARR_ELEMTYPE(array);
@@ -386,12 +440,14 @@ array_contains(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(1))
 	{
 	    for (i = 0; i < n; i++)
+        {
 			if (nulls[i])
             {
                 pfree(vals);
                 pfree(nulls);
             	PG_RETURN_BOOL(true);
             }
+        }
         pfree(vals);
         pfree(nulls);
 	    PG_RETURN_BOOL(false);
@@ -404,7 +460,9 @@ array_contains(PG_FUNCTION_ARGS)
     for (i = 0; i < n; i++)
     {
         if (nulls[i])
+        {
             continue;
+        }
         if (!compare(elem_type, vals[i], searched_elem, collation))
         {
             pfree(vals);
@@ -437,7 +495,9 @@ array_contains_all(PG_FUNCTION_ARGS)
     bool            found;
 
     if (PG_ARGISNULL(0) || PG_ARGISNULL(1))
+    {
         PG_RETURN_NULL();
+    }
 
     array = PG_GETARG_ARRAYTYPE_P(0);
     searched_array = PG_GETARG_ARRAYTYPE_P(1);
@@ -477,7 +537,10 @@ array_contains_all(PG_FUNCTION_ARGS)
 
         for (i = 0; i < n; i++)
         {
-            if (nulls[i]) continue;
+            if (nulls[i])
+            {
+                continue;
+            }
 
             if (!compare(elem_type, vals[i], searched_vals[j], collation))
             {
@@ -522,12 +585,16 @@ array_find_all(PG_FUNCTION_ARGS)
     Datum          *positions;
 
     if (PG_ARGISNULL(0))
+    {
         PG_RETURN_NULL();
+    }
 
     array = PG_GETARG_ARRAYTYPE_P(0);
 
     if (ARR_NDIM(array) > 1)
+    {
         ereport(ERROR, errmsg("multidimensional arrays is not supported"));
+    }
 
 	elem_type = ARR_ELEMTYPE(array);
 	
@@ -545,25 +612,27 @@ array_find_all(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(1))
 	{
 	    for (i = 0; i < n; i++)
+        {
 			if (nulls[i])
             {
                 positions[pos++] = Int32GetDatum(i + 1);
             }
+        }
 
-            positions_array = construct_array(
-                positions, 
-                pos, 
-                INT4OID, 
-                sizeof(int32), 
-                true,
-                'i'
-            );
+        positions_array = construct_array(
+            positions, 
+            pos, 
+            INT4OID, 
+            sizeof(int32), 
+            true,
+            'i'
+        );
 
-            pfree(vals);
-            pfree(nulls);
-            pfree(positions);
+        pfree(vals);
+        pfree(nulls);
+        pfree(positions);
 
-            PG_RETURN_ARRAYTYPE_P(positions_array);
+        PG_RETURN_ARRAYTYPE_P(positions_array);
     }
 
 	searched_elem  = PG_GETARG_DATUM(1);
@@ -573,7 +642,9 @@ array_find_all(PG_FUNCTION_ARGS)
     for (i = 0; i < n; i++)
     {
         if (nulls[i])
+        {
             continue;
+        }
         if (!compare(elem_type, vals[i], searched_elem, collation))
         {
             positions[pos++] = Int32GetDatum(i + 1);
@@ -619,7 +690,9 @@ array_filter(PG_FUNCTION_ARGS)
 
 
     if (PG_ARGISNULL(0) || PG_ARGISNULL(1))
+    {
         PG_RETURN_NULL();
+    }
 
     array = PG_GETARG_ARRAYTYPE_P(0);
 	elem_type = ARR_ELEMTYPE(array);
@@ -647,7 +720,9 @@ array_filter(PG_FUNCTION_ARGS)
     for (i = 0; i < n; i++)
     {
         if (nulls[i])
+        {
             continue;
+        }
         if (process_predicate(vals[i], elem_type, pred, collation))
         {
             result[pos++] = vals[i];
@@ -693,7 +768,9 @@ array_reject(PG_FUNCTION_ARGS)
 
 
     if (PG_ARGISNULL(0) || PG_ARGISNULL(1))
+    {
         PG_RETURN_NULL();
+    }
 
     array = PG_GETARG_ARRAYTYPE_P(0);
 	elem_type = ARR_ELEMTYPE(array);
@@ -721,7 +798,9 @@ array_reject(PG_FUNCTION_ARGS)
     for (i = 0; i < n; i++)
     {
         if (nulls[i])
+        {
             continue;
+        }
         if (!process_predicate(vals[i], elem_type, pred, collation))
         {
             result[pos++] = vals[i];
@@ -772,7 +851,9 @@ array_partition(PG_FUNCTION_ARGS)
     int             lbs[2] = {1, 1};
 
     if (PG_ARGISNULL(0) || PG_ARGISNULL(1))
+    {
         PG_RETURN_NULL();
+    }
 
     array = PG_GETARG_ARRAYTYPE_P(0);
 	elem_type = ARR_ELEMTYPE(array);
@@ -802,7 +883,9 @@ array_partition(PG_FUNCTION_ARGS)
     for (i = 0; i < n; i++)
     {
         if (nulls[i])
+        {
             continue;
+        }
         if (process_predicate(vals[i], elem_type, pred, collation))
         {
             result_ok[pos_ok++] = vals[i];
@@ -870,12 +953,16 @@ array_index_of(PG_FUNCTION_ARGS)
     int32           i;
 
     if (PG_ARGISNULL(0))
+    {
         PG_RETURN_NULL();
+    }
 
     array = PG_GETARG_ARRAYTYPE_P(0);
 
     if (ARR_NDIM(array) > 1)
+    {
         ereport(ERROR, errmsg("multidimensional arrays is not supported"));
+    }
 
 	elem_type = ARR_ELEMTYPE(array);
 	
@@ -885,12 +972,14 @@ array_index_of(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(1))
 	{
 	    for (i = 0; i < n; i++)
+        {
 			if (nulls[i])
             {
                 pfree(vals);
                 pfree(nulls);
             	PG_RETURN_INT32(i + 1);
             }
+        }
         pfree(vals);
         pfree(nulls);
 	    PG_RETURN_INT32(-1);
@@ -903,7 +992,9 @@ array_index_of(PG_FUNCTION_ARGS)
     for (i = 0; i < n; i++)
     {
         if (nulls[i])
+        {
             continue;
+        }
         if (!compare(elem_type, vals[i], searched_elem, collation))
         {
             pfree(vals);
@@ -933,12 +1024,16 @@ array_last_index_of(PG_FUNCTION_ARGS)
     int32           i;
 
     if (PG_ARGISNULL(0))
+    {
         PG_RETURN_NULL();
+    }
 
     array = PG_GETARG_ARRAYTYPE_P(0);
 
     if (ARR_NDIM(array) > 1)
+    {
         ereport(ERROR, errmsg("multidimensional arrays is not supported"));
+    }
 
 	elem_type = ARR_ELEMTYPE(array);
 	
@@ -948,12 +1043,14 @@ array_last_index_of(PG_FUNCTION_ARGS)
     if (PG_ARGISNULL(1))
 	{
 	    for (i = n - 1; i >= 0; i--)
+        {
 			if (nulls[i])
             {
                 pfree(vals);
                 pfree(nulls);
             	PG_RETURN_INT32(i + 1);
             }
+        }
         pfree(vals);
         pfree(nulls);
 	    PG_RETURN_INT32(-1);
@@ -966,7 +1063,9 @@ array_last_index_of(PG_FUNCTION_ARGS)
     for (i = n - 1; i >= 0; i--)
     {
         if (nulls[i])
+        {
             continue;
+        }
         if (!compare(elem_type, vals[i], searched_elem, collation))
         {
             pfree(vals);
