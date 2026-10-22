@@ -10,7 +10,8 @@ REGRESS = 01_pg_array_search       \
 			06_array_reject        \
 			07_array_partition     \
 			08_array_index_of      \
-			09_array_last_index_of
+			09_array_last_index_of \
+			10_predicate
 
 PG_CONFIG = pg_config
 PGXS := $(shell $(PG_CONFIG) --pgxs)

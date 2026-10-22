@@ -95,11 +95,16 @@ static Datum parse_item(const char *data, int len, int* pos, Oid item_type)
     bool is_float = 0;
     char* buf;
 
-    if (data[(*pos)] == '"')
+    if ((*pos) >= len)
+    {
+        ereport(ERROR, errmsg("predicate: expected constant"));
+    }
+
+    if (data[(*pos)] == '\"')
     {
         if (!(item_type == TEXTOID || item_type == VARCHAROID || item_type == BPCHAROID))
         {
-            ereport(ERROR, errmsg("incompatible types for comparison"));
+            ereport(ERROR, errmsg("predicate: array and constant type mismatch"));
         }
         
         (*pos)++;
@@ -109,7 +114,7 @@ static Datum parse_item(const char *data, int len, int* pos, Oid item_type)
 	    }
         if ((*pos) + item_len >= len)
         {
-            ereport(ERROR, errmsg("unsupported predicate"));
+            ereport(ERROR, errmsg("predicate: expected end of string ( \" )"));
         }
 
         buf = palloc((item_len+1)*sizeof(char));
@@ -129,7 +134,7 @@ static Datum parse_item(const char *data, int len, int* pos, Oid item_type)
             item = DirectFunctionCall3(bpcharin, CStringGetDatum(buf), ObjectIdGetDatum(BPCHAROID), Int32GetDatum(-1));
             break;
         default:
-            ereport(ERROR, errmsg("unsupported type for constant"));
+            ereport(ERROR, errmsg("predicate: array and constant type mismatch"));
         }
 
         (*pos) += item_len + 1;
@@ -141,7 +146,7 @@ static Datum parse_item(const char *data, int len, int* pos, Oid item_type)
         if (!(item_type == INT2OID || item_type == INT4OID || item_type == INT8OID ||
             item_type == FLOAT4OID || item_type == FLOAT8OID || item_type == NUMERICOID))
         {
-            ereport(ERROR, errmsg("incompatible types for comparison"));
+            ereport(ERROR, errmsg("predicate: array and constant type mismatch"));
         }
         
         if ((*pos) + item_len < len && data[(*pos) + item_len] == '-')
@@ -157,7 +162,7 @@ static Datum parse_item(const char *data, int len, int* pos, Oid item_type)
             {
                 if (is_float)
                 {
-                    ereport(ERROR, errmsg("unsupported predicate"));
+                    ereport(ERROR, errmsg("predicate: only 1 decimal point is allowed"));
                 }
                 is_float = 1;
             }
@@ -166,17 +171,17 @@ static Datum parse_item(const char *data, int len, int* pos, Oid item_type)
 
         if (item_len == 0)
         {
-            ereport(ERROR, errmsg("unsupported predicate"));
+            ereport(ERROR, errmsg("predicate: expected number"));
         }
 
         if (item_len == 1 && data[(*pos)] == '-')
         {
-            ereport(ERROR, errmsg("unsupported predicate"));
+            ereport(ERROR, errmsg("predicate: expected number"));
         }
 
         if (is_float && (item_type == INT2OID || item_type == INT4OID || item_type == INT8OID))
         {
-            ereport(ERROR, errmsg("incompatible types for comparison"));
+            ereport(ERROR, errmsg("predicate: array and constant type mismatch"));
         }
 
         buf = palloc((item_len+1)*sizeof(char));
@@ -204,7 +209,7 @@ static Datum parse_item(const char *data, int len, int* pos, Oid item_type)
                 item = DirectFunctionCall3(numeric_in, CStringGetDatum(buf), ObjectIdGetDatum(NUMERICOID), Int32GetDatum(-1));
                 break;
             default:
-                ereport(ERROR, errmsg("unsupported type for constant"));
+                ereport(ERROR, errmsg("predicate: array and constant type mismatch"));
             }
 
         (*pos) += item_len;
@@ -219,7 +224,7 @@ static predicate_op parse_operation(const char *data, int len, int* pos)
 {
     if ((*pos) >= len)
     {
-        ereport(ERROR, errmsg("unsupported predicate"));
+        ereport(ERROR, errmsg("predicate: expected operation"));
     }
     switch (data[(*pos)])
     {
@@ -233,7 +238,7 @@ static predicate_op parse_operation(const char *data, int len, int* pos)
     case '!':
         if (!((*pos) + 1 >= len && data[(*pos) + 1] == '='))
         {
-            ereport(ERROR, errmsg("unsupported predicate"));
+            ereport(ERROR, errmsg("predicate: unsupported operation"));
         }
         (*pos)+=2;
         return N_EQ_OP;
@@ -257,9 +262,9 @@ static predicate_op parse_operation(const char *data, int len, int* pos)
         (*pos)++;
         return MOD_OP;
     default:
-        ereport(ERROR, errmsg("unsupported predicate"));
+        ereport(ERROR, errmsg("predicate: unsupported operation"));
     }
-    ereport(ERROR, errmsg("unsupported predicate"));
+    ereport(ERROR, errmsg("predicate: unsupported operation"));
 }
 
 static predicate parse_predicate(const char *data, int len, Oid item_type)
@@ -270,7 +275,11 @@ static predicate parse_predicate(const char *data, int len, Oid item_type)
 
     pred.obj_type = item_type;
 
-    if (len == 0)
+    while (pos < len && data[pos] == ' ')
+    {
+        pos++;
+    }
+    if (pos >= len)
     {
         pred.op = NONE_OP;
         return pred;
@@ -284,7 +293,7 @@ static predicate parse_predicate(const char *data, int len, Oid item_type)
 
     if (!any_val)
     {
-        ereport(ERROR, errmsg("unsupported predicate"));
+        ereport(ERROR, errmsg("predicate: expected name"));
     }
 
     while (pos < len && data[pos] == ' ')
@@ -293,7 +302,7 @@ static predicate parse_predicate(const char *data, int len, Oid item_type)
     }
     if (pos >= len)
     {
-        ereport(ERROR, errmsg("unsupported predicate"));
+        ereport(ERROR, errmsg("predicate: expected operation"));
     }
 
     pred.op = parse_operation(data, len, &pos);
@@ -301,13 +310,13 @@ static predicate parse_predicate(const char *data, int len, Oid item_type)
     if ((item_type == TEXTOID || item_type == VARCHAROID || item_type == BPCHAROID) &&
         !(pred.op == EQ_OP || pred.op == N_EQ_OP))
     {
-        ereport(ERROR, errmsg("unsupported predicate"));
+        ereport(ERROR, errmsg("predicate: unsupported array type for operation"));
     }
     
     if (pred.op == MOD_OP &&
         !(item_type == INT2OID || item_type == INT4OID || item_type == INT8OID))
     {
-        ereport(ERROR, errmsg("unsupported predicate"));
+        ereport(ERROR, errmsg("predicate: unsupported array type for operation"));
     }
 
 
@@ -317,7 +326,7 @@ static predicate parse_predicate(const char *data, int len, Oid item_type)
     }
     if (pos >= len)
     {
-        ereport(ERROR, errmsg("unsupported predicate"));
+        ereport(ERROR, errmsg("predicate: expected constant"));
     }
 
     pred.obj1 = parse_item(data, len, &pos, item_type);
@@ -335,13 +344,17 @@ static predicate parse_predicate(const char *data, int len, Oid item_type)
         }
         else
         {
-            ereport(ERROR, errmsg("unsupported predicate"));
+            ereport(ERROR, errmsg("predicate: expected ="));
         }
     }
     
-    if (pred.op != MOD_OP || data[pos] != '=')
+    if (pred.op != MOD_OP)
     {
-        ereport(ERROR, errmsg("unsupported predicate"));
+        ereport(ERROR, errmsg("predicate: expected end of text"));
+    }
+    if (data[pos] != '=')
+    {
+        ereport(ERROR, errmsg("predicate: expected ="));
     }
 
     pos++;
@@ -352,7 +365,7 @@ static predicate parse_predicate(const char *data, int len, Oid item_type)
     }
     if (pos >= len)
     {
-        ereport(ERROR, errmsg("unsupported predicate"));
+        ereport(ERROR, errmsg("predicate: expected second constant"));
     }
 
     pred.obj2 = parse_item(data, len, &pos, item_type);
@@ -363,7 +376,7 @@ static predicate parse_predicate(const char *data, int len, Oid item_type)
     }
     if (pos < len)
     {
-        ereport(ERROR, errmsg("unsupported predicate"));
+        ereport(ERROR, errmsg("predicate: expected end of text"));
     }
 
     return pred;
@@ -373,7 +386,7 @@ static bool process_predicate(Datum obj, Oid obj_type, predicate pred, Oid colla
 {
     if (pred.obj_type != obj_type)
     {
-        ereport(ERROR, errmsg("predicate type does not match element type"));
+        ereport(ERROR, errmsg("predicate: array and constant type mismatch"));
     }
 
     switch (pred.op)
@@ -398,29 +411,29 @@ static bool process_predicate(Datum obj, Oid obj_type, predicate pred, Oid colla
         case INT2OID:
             if (DatumGetInt16(pred.obj1) == 0)
             {
-                ereport(ERROR, errmsg("division by zero"));
+                ereport(ERROR, errmsg("predicate: division by zero"));
             }
             return compare(obj_type, Int16GetDatum(DatumGetInt16(obj) % DatumGetInt16(pred.obj1)), pred.obj2, collation) == 0;
         case INT4OID:
             if (DatumGetInt32(pred.obj1) == 0)
             {
-                ereport(ERROR, errmsg("division by zero"));
+                ereport(ERROR, errmsg("predicate: division by zero"));
             }
             return compare(obj_type, Int32GetDatum(DatumGetInt32(obj) % DatumGetInt32(pred.obj1)), pred.obj2, collation) == 0;
         case INT8OID:
             if (DatumGetInt64(pred.obj1) == 0)
             {
-                ereport(ERROR, errmsg("division by zero"));
+                ereport(ERROR, errmsg("predicate: division by zero"));
             }
             return compare(obj_type, Int64GetDatum(DatumGetInt64(obj) % DatumGetInt64(pred.obj1)), pred.obj2, collation) == 0;
         default:
-            ereport(ERROR, errmsg("unsupported operation"));
+            ereport(ERROR, errmsg("predicate: unsupported operation"));
         }
         break;
     default:
-        ereport(ERROR, errmsg("unsupported operation"));
+        ereport(ERROR, errmsg("predicate: unsupported operation"));
     }
-    ereport(ERROR, errmsg("unsupported operation"));
+    ereport(ERROR, errmsg("predicate: unsupported operation"));
 }
 
 Datum

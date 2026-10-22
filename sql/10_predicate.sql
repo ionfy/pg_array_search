@@ -1,0 +1,16 @@
+SELECT array_filter(ARRAY[1, 2, 3], 'some value > 1');
+SELECT array_filter(ARRAY[1, 2, 3], 'x > 1.5');
+SELECT array_filter(ARRAY[1.1, 1.2, 1.3], 'x % 2 = 1');
+SELECT array_filter(ARRAY['ab', 'cd', 'ef'], 'x < "cd"');
+SELECT array_filter(ARRAY[1, 2, 3], 'x == "2"');
+SELECT array_filter(ARRAY[1, 2, 3], 'x + 1 = 2');
+SELECT array_filter(ARRAY[1, 2, 3], 'x');
+SELECT array_filter(ARRAY[1, 2, 3], '4 == x');
+SELECT array_filter(ARRAY['ab', 'cd', 'ef'], 'x == "cd');
+SELECT array_filter(ARRAY['ab', 'cd', 'ef'], 'x == cd');
+SELECT array_filter(ARRAY[1, 2, 3], 'x == ');
+SELECT array_filter(ARRAY[1, 2, 3], 'x % 2');
+SELECT array_filter(ARRAY[1, 2, 3], 'x > 4 < 2');
+SELECT array_filter(ARRAY[1, 2, 3], 'x % 0 = 1');
+SELECT array_filter(ARRAY[1, 2, 3], '2');
+SELECT array_filter(ARRAY[1, 2, 3], '              x               ==                2          ');

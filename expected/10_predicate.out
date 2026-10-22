@@ -1,0 +1,36 @@
+SELECT array_filter(ARRAY[1, 2, 3], 'some value > 1');
+ERROR:  predicate: unsupported operation
+SELECT array_filter(ARRAY[1, 2, 3], 'x > 1.5');
+ERROR:  predicate: array and constant type mismatch
+SELECT array_filter(ARRAY[1.1, 1.2, 1.3], 'x % 2 = 1');
+ERROR:  predicate: unsupported array type for operation
+SELECT array_filter(ARRAY['ab', 'cd', 'ef'], 'x < "cd"');
+ERROR:  predicate: unsupported array type for operation
+SELECT array_filter(ARRAY[1, 2, 3], 'x == "2"');
+ERROR:  predicate: array and constant type mismatch
+SELECT array_filter(ARRAY[1, 2, 3], 'x + 1 = 2');
+ERROR:  predicate: unsupported operation
+SELECT array_filter(ARRAY[1, 2, 3], 'x');
+ERROR:  predicate: expected operation
+SELECT array_filter(ARRAY[1, 2, 3], '4 == x');
+ERROR:  predicate: expected name
+SELECT array_filter(ARRAY['ab', 'cd', 'ef'], 'x == "cd');
+ERROR:  predicate: expected end of string ( " )
+SELECT array_filter(ARRAY['ab', 'cd', 'ef'], 'x == cd');
+ERROR:  predicate: array and constant type mismatch
+SELECT array_filter(ARRAY[1, 2, 3], 'x == ');
+ERROR:  predicate: expected constant
+SELECT array_filter(ARRAY[1, 2, 3], 'x % 2');
+ERROR:  predicate: expected =
+SELECT array_filter(ARRAY[1, 2, 3], 'x > 4 < 2');
+ERROR:  predicate: expected end of text
+SELECT array_filter(ARRAY[1, 2, 3], 'x % 0 = 1');
+ERROR:  predicate: division by zero
+SELECT array_filter(ARRAY[1, 2, 3], '2');
+ERROR:  predicate: expected name
+SELECT array_filter(ARRAY[1, 2, 3], '              x               ==                2          ');
+ array_filter 
+--------------
+ {2}
+(1 row)
+

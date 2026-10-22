@@ -28,3 +28,4 @@ lib*dll.def
 lib*.pc
 *.diff*
 results/
+./*.out

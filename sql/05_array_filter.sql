@@ -7,6 +7,3 @@ SELECT array_filter(ARRAY['foo', 'bar', 'baz'], 'x == "foobar"');
 SELECT array_filter(ARRAY[]::integer[], 'x % 3 = 1');
 SELECT array_filter(NULL::integer[], 'x % 3 = 1');
 SELECT array_filter(ARRAY[1, 2, 3], NULL);
-SELECT array_filter(ARRAY[1, 3, 2, 3, 4], 'x + 3 = 1');
-SELECT array_filter(ARRAY[1.2, 3.4], 'x % 4 = 1');
-SELECT array_filter(ARRAY['foo', 'bar'], 'x > 4');

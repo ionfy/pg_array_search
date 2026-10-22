@@ -13,6 +13,8 @@ make && make install
 make installcheck
 ```
 
+Или запустите скрипт install_and_test.sh
+
 ## Функции
 
 #### array_contains ( anyarray, anyelement ) → boolean

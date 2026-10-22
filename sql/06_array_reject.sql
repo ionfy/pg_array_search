@@ -7,6 +7,3 @@ SELECT array_reject(ARRAY['foo', 'bar', 'baz'], 'x == "foobar"');
 SELECT array_reject(ARRAY[]::integer[], 'x % 3 = 1');
 SELECT array_reject(NULL::integer[], 'x % 3 = 1');
 SELECT array_reject(ARRAY[1, 2, 3], NULL);
-SELECT array_reject(ARRAY[1, 3, 2, 3, 4], 'x + 3 = 1');
-SELECT array_reject(ARRAY[1.2, 3.4], 'x % 4 = 1');
-SELECT array_reject(ARRAY['foo', 'bar'], 'x > 4');
