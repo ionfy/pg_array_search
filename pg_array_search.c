@@ -155,7 +155,10 @@ static Datum parse_item(const char *data, int len, int* pos, Oid item_type)
         {
             if (data[(*pos) + item_len] == '.')
             {
-                if (is_float) ereport(ERROR, errmsg("unsupported predicate"));
+                if (is_float)
+                {
+                    ereport(ERROR, errmsg("unsupported predicate"));
+                }
                 is_float = 1;
             }
             item_len++;
@@ -222,7 +225,9 @@ static predicate_op parse_operation(const char *data, int len, int* pos)
     {
     case '=':
         if ((*pos) + 1 < len && data[(*pos) + 1] == '=')
+        {
             (*pos)++;
+        }
         (*pos)++;
         return EQ_OP;
     case '!':
@@ -392,15 +397,21 @@ static bool process_predicate(Datum obj, Oid obj_type, predicate pred, Oid colla
         {
         case INT2OID:
             if (DatumGetInt16(pred.obj1) == 0)
+            {
                 ereport(ERROR, errmsg("division by zero"));
+            }
             return compare(obj_type, Int16GetDatum(DatumGetInt16(obj) % DatumGetInt16(pred.obj1)), pred.obj2, collation) == 0;
         case INT4OID:
             if (DatumGetInt32(pred.obj1) == 0)
+            {
                 ereport(ERROR, errmsg("division by zero"));
+            }
             return compare(obj_type, Int32GetDatum(DatumGetInt32(obj) % DatumGetInt32(pred.obj1)), pred.obj2, collation) == 0;
         case INT8OID:
             if (DatumGetInt64(pred.obj1) == 0)
+            {
                 ereport(ERROR, errmsg("division by zero"));
+            }
             return compare(obj_type, Int64GetDatum(DatumGetInt64(obj) % DatumGetInt64(pred.obj1)), pred.obj2, collation) == 0;
         default:
             ereport(ERROR, errmsg("unsupported operation"));
