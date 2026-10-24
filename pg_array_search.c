@@ -384,10 +384,7 @@ static predicate parse_predicate(const char *data, int len, Oid item_type)
 
 static bool process_predicate(Datum obj, Oid obj_type, predicate pred, Oid collation)
 {
-    if (pred.obj_type != obj_type)
-    {
-        ereport(ERROR, errmsg("predicate: array and constant type mismatch"));
-    }
+    Assert(pred.obj_type == obj_type);
 
     switch (pred.op)
     {
@@ -443,12 +440,9 @@ array_contains(PG_FUNCTION_ARGS)
     Datum           searched_elem;
     Oid             elem_type;
 	Oid             collation;
-    Datum          *vals;
-    bool           *nulls;
-	int16           typlen;
-	bool            typbyval;
-	char            typalign;
-    int             n, i;
+    ArrayIterator   iterator;
+    Datum           element;
+    bool            isnull;
 
     if (PG_ARGISNULL(0))
     {
@@ -457,46 +451,42 @@ array_contains(PG_FUNCTION_ARGS)
 
     array = PG_GETARG_ARRAYTYPE_P(0);
 	elem_type = ARR_ELEMTYPE(array);
-	
-	get_typlenbyvalalign(elem_type, &typlen, &typbyval, &typalign);
-    deconstruct_array(array, elem_type, typlen, typbyval, typalign, &vals, &nulls, &n);
+
+    iterator = array_create_iterator(array, 0, NULL);
 
     if (PG_ARGISNULL(1))
 	{
-	    for (i = 0; i < n; i++)
+        while (array_iterate(iterator, &element, &isnull))
         {
-			if (nulls[i])
+            if (isnull)
             {
-                pfree(vals);
-                pfree(nulls);
-            	PG_RETURN_BOOL(true);
+                array_free_iterator(iterator);
+                PG_RETURN_BOOL(true);
             }
         }
-        pfree(vals);
-        pfree(nulls);
-	    PG_RETURN_BOOL(false);
+
+        array_free_iterator(iterator);
+        PG_RETURN_BOOL(false);
     }
 
 	searched_elem  = PG_GETARG_DATUM(1);
-    
 	collation = PG_GET_COLLATION();
 
-    for (i = 0; i < n; i++)
+    while (array_iterate(iterator, &element, &isnull))
     {
-        if (nulls[i])
+        if (isnull)
         {
             continue;
         }
-        if (!compare(elem_type, vals[i], searched_elem, collation))
+
+        if (!compare(elem_type, element, searched_elem, collation))
         {
-            pfree(vals);
-            pfree(nulls);
+            array_free_iterator(iterator);
             PG_RETURN_BOOL(true);
         }
     }
 
-    pfree(vals);
-    pfree(nulls);
+    array_free_iterator(iterator);
     PG_RETURN_BOOL(false);
 }
 
@@ -507,15 +497,12 @@ array_contains_all(PG_FUNCTION_ARGS)
     ArrayType      *searched_array;
     Oid             elem_type;
     Oid             collation;
-    Datum          *vals;
-    Datum          *searched_vals;
-    bool           *nulls;
-    bool           *searched_nulls;
-    int16           typlen;
-    bool            typbyval;
-    char            typalign;
-    int             n, i;
-    int             searched_n, j;
+    ArrayIterator   iterator;
+    Datum           element;
+    bool            isnull;
+    ArrayIterator   searched_iterator;
+    Datum           searched_element;
+    bool            searched_isnull;
     bool            found;
 
     if (PG_ARGISNULL(0) || PG_ARGISNULL(1))
@@ -528,65 +515,55 @@ array_contains_all(PG_FUNCTION_ARGS)
 
     elem_type = ARR_ELEMTYPE(searched_array);
 
-    get_typlenbyvalalign(elem_type, &typlen, &typbyval, &typalign);
-    deconstruct_array(array, elem_type, typlen, typbyval, typalign, &vals, &nulls, &n);
-    deconstruct_array(searched_array, elem_type, typlen, typbyval, typalign, &searched_vals, &searched_nulls, &searched_n);
+    Assert(elem_type == ARR_ELEMTYPE(array));
 
     collation = PG_GET_COLLATION();
 
-    for (j = 0; j < searched_n; j++)
-    {
-        found = 0;
+    searched_iterator = array_create_iterator(searched_array, 0, NULL);
 
-        if (searched_nulls[j])
+    while (array_iterate(searched_iterator, &searched_element, &searched_isnull))
+    {
+        found = false;
+
+        iterator = array_create_iterator(array, 0, NULL);
+
+        if (searched_isnull)
         {
-            for (i = 0; i < n; i++)
+            while (array_iterate(iterator, &element, &isnull))
             {
-                if (nulls[i])
+                if (isnull)
                 {
-                    found = 1;
+                    found = true;
                     break;
                 }
             }
-            if (!found)
-            {
-                pfree(searched_vals);
-                pfree(searched_nulls);
-                pfree(vals);
-                pfree(nulls);
-                PG_RETURN_BOOL(false);
-            }
-            continue;
         }
-
-        for (i = 0; i < n; i++)
+        else
         {
-            if (nulls[i])
+            while (array_iterate(iterator, &element, &isnull))
             {
-                continue;
-            }
-
-            if (!compare(elem_type, vals[i], searched_vals[j], collation))
-            {
-                found = 1;
-                break;
+                if (isnull)
+                {
+                    continue;
+                }
+                if (!compare(elem_type, element, searched_element, collation))
+                {
+                    found = true;
+                    break;
+                }
             }
         }
+
+        array_free_iterator(iterator);
 
         if (!found)
         {
-            pfree(searched_vals);
-            pfree(searched_nulls);
-            pfree(vals);
-            pfree(nulls);
+            array_free_iterator(searched_iterator);
             PG_RETURN_BOOL(false);
         }
     }
 
-    pfree(searched_vals);
-    pfree(searched_nulls);
-    pfree(vals);
-    pfree(nulls);
+    array_free_iterator(searched_iterator);
     PG_RETURN_BOOL(true);
 }
 
@@ -598,14 +575,15 @@ array_find_all(PG_FUNCTION_ARGS)
     Datum           searched_elem;
     Oid             elem_type;
 	Oid             collation;
-    Datum          *vals;
-    bool           *nulls;
 	int16           typlen;
 	bool            typbyval;
 	char            typalign;
-    int             n;
-    int32           i;
+    ArrayIterator   iterator;
+    Datum           element;
+    bool            isnull;
+    int32           size;
     int32           pos;
+    int32           positions_size;
     Datum          *positions;
 
     if (PG_ARGISNULL(0))
@@ -620,74 +598,69 @@ array_find_all(PG_FUNCTION_ARGS)
         ereport(ERROR, errmsg("multidimensional arrays is not supported"));
     }
 
-	elem_type = ARR_ELEMTYPE(array);
-	
-	get_typlenbyvalalign(elem_type, &typlen, &typbyval, &typalign);
-    deconstruct_array(array, elem_type, typlen, typbyval, typalign, &vals, &nulls, &n);
+    size = ArrayGetNItems(ARR_NDIM(array), ARR_DIMS(array));
 
-    if (n == 0)
+	elem_type = ARR_ELEMTYPE(array);
+
+    if (size <= 0)
     {
         PG_RETURN_ARRAYTYPE_P(construct_empty_array(INT4OID));
     }
 
-    positions = palloc(n*sizeof(Datum));
-    pos = 0;
+    positions = palloc(size*sizeof(Datum));
+    positions_size = 0;
+
+    iterator = array_create_iterator(array, 0, NULL);
+
+    pos = 1;
 
     if (PG_ARGISNULL(1))
 	{
-	    for (i = 0; i < n; i++)
+        while (array_iterate(iterator, &element, &isnull))
         {
-			if (nulls[i])
+            if (isnull)
             {
-                positions[pos++] = Int32GetDatum(i + 1);
+                positions[positions_size++] = pos;
             }
+
+            pos++;
         }
-
-        positions_array = construct_array(
-            positions, 
-            pos, 
-            INT4OID, 
-            sizeof(int32), 
-            true,
-            'i'
-        );
-
-        pfree(vals);
-        pfree(nulls);
-        pfree(positions);
-
-        PG_RETURN_ARRAYTYPE_P(positions_array);
     }
-
-	searched_elem  = PG_GETARG_DATUM(1);
-    
-	collation = PG_GET_COLLATION();
-
-    for (i = 0; i < n; i++)
+    else
     {
-        if (nulls[i])
+        searched_elem  = PG_GETARG_DATUM(1);
+	    collation = PG_GET_COLLATION();
+
+        while (array_iterate(iterator, &element, &isnull))
         {
-            continue;
-        }
-        if (!compare(elem_type, vals[i], searched_elem, collation))
-        {
-            positions[pos++] = Int32GetDatum(i + 1);
+            if (isnull)
+            {
+                continue;
+            }
+
+            if (!compare(elem_type, element, searched_elem, collation))
+            {
+                positions[positions_size++] = pos;
+            }
+
+            pos++;
         }
     }
+
+    array_free_iterator(iterator);
+
+    get_typlenbyvalalign(INT4OID, &typlen, &typbyval, &typalign);
 
     positions_array = construct_array(
                 positions, 
-                pos, 
+                positions_size, 
                 INT4OID, 
-                sizeof(int32), 
-                true,
-                'i'
+                typlen, 
+                typbyval,
+                typalign
             );
 
-    pfree(vals);
-    pfree(nulls);
     pfree(positions);
-
     PG_RETURN_ARRAYTYPE_P(positions_array);
 }
 
@@ -698,14 +671,14 @@ array_filter(PG_FUNCTION_ARGS)
     ArrayType      *result_array;
     Oid             elem_type;
 	Oid             collation;
-    Datum          *vals;
-    bool           *nulls;
+    ArrayIterator   iterator;
+    Datum           element;
+    bool            isnull;
 	int16           typlen;
 	bool            typbyval;
 	char            typalign;
-    int             n;
-    int32           i;
-    int32           pos;
+    int32           size;
+    int32           result_size;
     Datum          *result;
     size_t          pred_buf_len;
     char           *pred_buf;
@@ -721,51 +694,51 @@ array_filter(PG_FUNCTION_ARGS)
     array = PG_GETARG_ARRAYTYPE_P(0);
 	elem_type = ARR_ELEMTYPE(array);
 	
-	get_typlenbyvalalign(elem_type, &typlen, &typbyval, &typalign);
-    deconstruct_array(array, elem_type, typlen, typbyval, typalign, &vals, &nulls, &n);
+    size = ArrayGetNItems(ARR_NDIM(array), ARR_DIMS(array));
 
-    if (n == 0)
+    if (size <= 0)
     {
         PG_RETURN_ARRAYTYPE_P(construct_empty_array(elem_type));
     }
     
-    result = palloc(n*sizeof(Datum));
-    pos = 0;
+    result = palloc(size*sizeof(Datum));
+    result_size = 0;
 
 	collation = PG_GET_COLLATION();
 
     pred_text = PG_GETARG_TEXT_PP(1);
-
     pred_buf_len = VARSIZE_ANY_EXHDR(pred_text);
     pred_buf = VARDATA_ANY(pred_text);
-
     pred = parse_predicate(pred_buf, pred_buf_len, elem_type);
 
-    for (i = 0; i < n; i++)
+    iterator = array_create_iterator(array, 0, NULL);
+
+    while (array_iterate(iterator, &element, &isnull))
     {
-        if (nulls[i])
+        if (isnull)
         {
             continue;
         }
-        if (process_predicate(vals[i], elem_type, pred, collation))
+
+        if (process_predicate(element, elem_type, pred, collation))
         {
-            result[pos++] = vals[i];
+            result[result_size++] = element;
         }
     }
 
+    array_free_iterator(iterator);
+
+    get_typlenbyvalalign(elem_type, &typlen, &typbyval, &typalign);
     result_array = construct_array(
                 result, 
-                pos,
+                result_size,
                 elem_type,
                 typlen, 
                 typbyval, 
                 typalign
             );
 
-    pfree(vals);
-    pfree(nulls);
     pfree(result);
-
     PG_RETURN_ARRAYTYPE_P(result_array);
 }
 
@@ -776,14 +749,14 @@ array_reject(PG_FUNCTION_ARGS)
     ArrayType      *result_array;
     Oid             elem_type;
 	Oid             collation;
-    Datum          *vals;
-    bool           *nulls;
+    ArrayIterator   iterator;
+    Datum           element;
+    bool            isnull;
 	int16           typlen;
 	bool            typbyval;
 	char            typalign;
-    int             n;
-    int32           i;
-    int32           pos;
+    int32           size;
+    int32           result_size;
     Datum          *result;
     size_t          pred_buf_len;
     char           *pred_buf;
@@ -799,51 +772,51 @@ array_reject(PG_FUNCTION_ARGS)
     array = PG_GETARG_ARRAYTYPE_P(0);
 	elem_type = ARR_ELEMTYPE(array);
 	
-	get_typlenbyvalalign(elem_type, &typlen, &typbyval, &typalign);
-    deconstruct_array(array, elem_type, typlen, typbyval, typalign, &vals, &nulls, &n);
+    size = ArrayGetNItems(ARR_NDIM(array), ARR_DIMS(array));
 
-    if (n == 0)
+    if (size <= 0)
     {
         PG_RETURN_ARRAYTYPE_P(construct_empty_array(elem_type));
     }
     
-    result = palloc(n*sizeof(Datum));
-    pos = 0;
+    result = palloc(size*sizeof(Datum));
+    result_size = 0;
 
 	collation = PG_GET_COLLATION();
 
     pred_text = PG_GETARG_TEXT_PP(1);
-
     pred_buf_len = VARSIZE_ANY_EXHDR(pred_text);
     pred_buf = VARDATA_ANY(pred_text);
-
     pred = parse_predicate(pred_buf, pred_buf_len, elem_type);
 
-    for (i = 0; i < n; i++)
+    iterator = array_create_iterator(array, 0, NULL);
+
+    while (array_iterate(iterator, &element, &isnull))
     {
-        if (nulls[i])
+        if (isnull)
         {
             continue;
         }
-        if (!process_predicate(vals[i], elem_type, pred, collation))
+
+        if (!process_predicate(element, elem_type, pred, collation))
         {
-            result[pos++] = vals[i];
+            result[result_size++] = element;
         }
     }
 
+    array_free_iterator(iterator);
+
+    get_typlenbyvalalign(elem_type, &typlen, &typbyval, &typalign);
     result_array = construct_array(
                 result, 
-                pos,
+                result_size,
                 elem_type,
                 typlen, 
                 typbyval, 
                 typalign
             );
 
-    pfree(vals);
-    pfree(nulls);
     pfree(result);
-
     PG_RETURN_ARRAYTYPE_P(result_array);
 }
 
@@ -852,19 +825,19 @@ array_partition(PG_FUNCTION_ARGS)
 {
     ArrayType      *array;
     ArrayType      *result_array;
+    ArrayIterator   iterator;
+    Datum           element;
+    bool            isnull;
     Oid             elem_type;
 	Oid             collation;
-    Datum          *vals;
-    bool           *nulls;
 	int16           typlen;
 	bool            typbyval;
 	char            typalign;
-    int             n;
-    int32           i;
-    int32           pos_ok;
-    int32           pos_no;
-    Datum          *result_ok;
-    Datum          *result_no;
+    int32           size_ok;
+    int32           size_no;
+    int32           size_max;
+    int32           size;
+    Datum          *result;
     bool           *result_nulls;
     size_t          pred_buf_len;
     char           *pred_buf;
@@ -883,17 +856,17 @@ array_partition(PG_FUNCTION_ARGS)
 	elem_type = ARR_ELEMTYPE(array);
 	
 	get_typlenbyvalalign(elem_type, &typlen, &typbyval, &typalign);
-    deconstruct_array(array, elem_type, typlen, typbyval, typalign, &vals, &nulls, &n);
 
-    if (n == 0)
+    size = ArrayGetNItems(ARR_NDIM(array), ARR_DIMS(array));
+
+    if (size <= 0)
     {
         PG_RETURN_ARRAYTYPE_P(construct_empty_array(elem_type));
     }
     
-    result_ok = palloc(n*sizeof(Datum)*2);
-    pos_ok = 0;
-    result_no = palloc(n*sizeof(Datum));
-    pos_no = 0;
+    result = palloc(size*sizeof(Datum)*2);
+    size_ok = 0;
+    size_no = 0;
 
 	collation = PG_GET_COLLATION();
 
@@ -904,44 +877,46 @@ array_partition(PG_FUNCTION_ARGS)
 
     pred = parse_predicate(pred_buf, pred_buf_len, elem_type);
 
-    for (i = 0; i < n; i++)
+    iterator = array_create_iterator(array, 0, NULL);
+
+    while (array_iterate(iterator, &element, &isnull))
     {
-        if (nulls[i])
+        if (isnull)
         {
             continue;
         }
-        if (process_predicate(vals[i], elem_type, pred, collation))
+
+        if (process_predicate(element, elem_type, pred, collation))
         {
-            result_ok[pos_ok++] = vals[i];
+            result[size_ok++] = element;
         }
         else
         {
-            result_no[pos_no++] = vals[i];
+            result[size + (size_no++)] = element;
         }
     }
 
-    result_nulls = palloc0(n*sizeof(bool)*2);
+    array_free_iterator(iterator);
 
-    if (pos_ok == pos_no)
+    size_max = (size_ok > size_no) ? size_ok : size_no;
+
+    result_nulls = palloc0(sizeof(bool) * size_max * 2);
+
+    dims[1] = size_max;
+
+    memmove(result + size_max, result + size, size_no*sizeof(Datum));
+
+    if (size_ok < size_max)
     {
-        memcpy(result_ok + pos_ok, result_no, pos_no*sizeof(Datum));
-        dims[1] = pos_ok;
+        memset(result_nulls + size_ok, true, (size_max - size_ok) * sizeof(bool));
     }
-    else if (pos_ok > pos_no)
+    if (size_no < size_max)
     {
-        memcpy(result_ok + pos_ok, result_no, pos_no*sizeof(Datum));
-        memset(result_nulls + pos_ok + pos_no, true, (pos_ok - pos_no) * sizeof(bool));
-        dims[1] = pos_ok;
-    }
-    else
-    {
-        memcpy(result_ok + pos_no, result_no, pos_no*sizeof(Datum));
-        memset(result_nulls + pos_ok, true, (pos_no - pos_ok) * sizeof(bool));
-        dims[1] = pos_no;
+        memset(result_nulls + size_max + size_no, true, (size_max - size_no) * sizeof(bool));
     }
 
     result_array = construct_md_array(
-                result_ok, 
+                result, 
                 result_nulls,
                 ndims,
                 dims,
@@ -952,10 +927,7 @@ array_partition(PG_FUNCTION_ARGS)
                 typalign
             );
 
-    pfree(vals);
-    pfree(nulls);
-    pfree(result_ok);
-    pfree(result_no);
+    pfree(result);
     pfree(result_nulls);
 
     PG_RETURN_ARRAYTYPE_P(result_array);
@@ -968,13 +940,10 @@ array_index_of(PG_FUNCTION_ARGS)
     Datum           searched_elem;
     Oid             elem_type;
 	Oid             collation;
-    Datum          *vals;
-    bool           *nulls;
-	int16           typlen;
-	bool            typbyval;
-	char            typalign;
-    int             n;
-    int32           i;
+    ArrayIterator   iterator;
+    Datum           element;
+    bool            isnull;
+    int32           pos;
 
     if (PG_ARGISNULL(0))
     {
@@ -989,46 +958,48 @@ array_index_of(PG_FUNCTION_ARGS)
     }
 
 	elem_type = ARR_ELEMTYPE(array);
-	
-	get_typlenbyvalalign(elem_type, &typlen, &typbyval, &typalign);
-    deconstruct_array(array, elem_type, typlen, typbyval, typalign, &vals, &nulls, &n);
+
+    pos = 1;
+
+    iterator = array_create_iterator(array, 0, NULL);
 
     if (PG_ARGISNULL(1))
 	{
-	    for (i = 0; i < n; i++)
+        while (array_iterate(iterator, &element, &isnull))
         {
-			if (nulls[i])
+            if (isnull)
             {
-                pfree(vals);
-                pfree(nulls);
-            	PG_RETURN_INT32(i + 1);
+                array_free_iterator(iterator);
+                PG_RETURN_INT32(pos);
             }
+
+            pos++;
         }
-        pfree(vals);
-        pfree(nulls);
-	    PG_RETURN_INT32(-1);
+
+        array_free_iterator(iterator);
+        PG_RETURN_INT32(-1);
     }
 
 	searched_elem  = PG_GETARG_DATUM(1);
-    
 	collation = PG_GET_COLLATION();
 
-    for (i = 0; i < n; i++)
+    while (array_iterate(iterator, &element, &isnull))
     {
-        if (nulls[i])
+        if (isnull)
         {
             continue;
         }
-        if (!compare(elem_type, vals[i], searched_elem, collation))
+
+        if (!compare(elem_type, element, searched_elem, collation))
         {
-            pfree(vals);
-            pfree(nulls);
-            PG_RETURN_INT32(i + 1);
+            array_free_iterator(iterator);
+            PG_RETURN_INT32(pos);
         }
+
+        pos++;
     }
 
-    pfree(vals);
-    pfree(nulls);
+    array_free_iterator(iterator);
     PG_RETURN_INT32(-1);
 }
 
@@ -1039,13 +1010,11 @@ array_last_index_of(PG_FUNCTION_ARGS)
     Datum           searched_elem;
     Oid             elem_type;
 	Oid             collation;
-    Datum          *vals;
-    bool           *nulls;
-	int16           typlen;
-	bool            typbyval;
-	char            typalign;
-    int             n;
-    int32           i;
+    ArrayIterator   iterator;
+    Datum           element;
+    bool            isnull;
+    int32           pos;
+    int32           position;
 
     if (PG_ARGISNULL(0))
     {
@@ -1058,47 +1027,49 @@ array_last_index_of(PG_FUNCTION_ARGS)
     {
         ereport(ERROR, errmsg("multidimensional arrays is not supported"));
     }
-
+    
 	elem_type = ARR_ELEMTYPE(array);
-	
-	get_typlenbyvalalign(elem_type, &typlen, &typbyval, &typalign);
-    deconstruct_array(array, elem_type, typlen, typbyval, typalign, &vals, &nulls, &n);
+
+    pos = 1;
+
+    iterator = array_create_iterator(array, 0, NULL);
+
+    position = -1;
 
     if (PG_ARGISNULL(1))
 	{
-	    for (i = n - 1; i >= 0; i--)
+        while (array_iterate(iterator, &element, &isnull))
         {
-			if (nulls[i])
+            if (isnull)
             {
-                pfree(vals);
-                pfree(nulls);
-            	PG_RETURN_INT32(i + 1);
+                position = pos;
             }
+
+            pos++;
         }
-        pfree(vals);
-        pfree(nulls);
-	    PG_RETURN_INT32(-1);
+
+        array_free_iterator(iterator);
+        PG_RETURN_INT32(position);
     }
 
 	searched_elem  = PG_GETARG_DATUM(1);
-    
 	collation = PG_GET_COLLATION();
 
-    for (i = n - 1; i >= 0; i--)
+    while (array_iterate(iterator, &element, &isnull))
     {
-        if (nulls[i])
+        if (isnull)
         {
             continue;
         }
-        if (!compare(elem_type, vals[i], searched_elem, collation))
+
+        if (!compare(elem_type, element, searched_elem, collation))
         {
-            pfree(vals);
-            pfree(nulls);
-            PG_RETURN_INT32(i + 1);
+            position = pos;
         }
+
+        pos++;
     }
 
-    pfree(vals);
-    pfree(nulls);
-    PG_RETURN_INT32(-1);
+    array_free_iterator(iterator);
+    PG_RETURN_INT32(position);
 }
