@@ -52,3 +52,5 @@ SELECT array_partition(ARRAY[1, 2, 3], NULL);
  
 (1 row)
 
+SELECT array_partition(array_fill(1::int, ARRAY[67108864]), 'x = 1');
+ERROR:  array size exceeds the maximum allowed (67108863)

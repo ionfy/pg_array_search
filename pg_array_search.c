@@ -1,14 +1,15 @@
 #include "postgres.h"
 #include "fmgr.h"
 #include "utils/array.h"
-#include "utils/typcache.h"
 #include "utils/lsyscache.h"
 #include "utils/builtins.h"
 #include "utils/numeric.h"
 #include "catalog/pg_type.h"
-#include "common/int.h"
+#include "utils/memutils.h"
 
 #include <string.h>
+
+static const Size PG_ARRAY_SEARCH_MAX_ALLOWED_SIZE = (MaxAllocSize / sizeof(Datum));
 
 PG_MODULE_MAGIC;
 
@@ -117,7 +118,7 @@ static Datum parse_item(const char *data, int len, int* pos, Oid item_type)
             ereport(ERROR, errmsg("predicate: expected end of string ( \" )"));
         }
 
-        buf = palloc((item_len+1)*sizeof(char));
+        buf = (char*)palloc(sizeof(char)*(item_len+1));
         memcpy(buf, data + (*pos), item_len*sizeof(char));
         buf[item_len] = '\0';
 
@@ -184,7 +185,7 @@ static Datum parse_item(const char *data, int len, int* pos, Oid item_type)
             ereport(ERROR, errmsg("predicate: array and constant type mismatch"));
         }
 
-        buf = palloc((item_len+1)*sizeof(char));
+        buf = (char*)palloc(sizeof(char)*(item_len+1));
         memcpy(buf, data + (*pos), item_len*sizeof(char));
         buf[item_len] = '\0';
 
@@ -607,7 +608,12 @@ array_find_all(PG_FUNCTION_ARGS)
         PG_RETURN_ARRAYTYPE_P(construct_empty_array(INT4OID));
     }
 
-    positions = palloc(size*sizeof(Datum));
+    if (size > PG_ARRAY_SEARCH_MAX_ALLOWED_SIZE)
+    {
+        ereport(ERROR, errmsg("array size exceeds the maximum allowed (%zu)", PG_ARRAY_SEARCH_MAX_ALLOWED_SIZE));
+    }
+
+    positions = (Datum*)palloc(sizeof(Datum)*size);
     positions_size = 0;
 
     iterator = array_create_iterator(array, 0, NULL);
@@ -620,7 +626,7 @@ array_find_all(PG_FUNCTION_ARGS)
         {
             if (isnull)
             {
-                positions[positions_size++] = pos;
+                positions[positions_size++] = Int32GetDatum(pos);
             }
 
             pos++;
@@ -633,14 +639,9 @@ array_find_all(PG_FUNCTION_ARGS)
 
         while (array_iterate(iterator, &element, &isnull))
         {
-            if (isnull)
+            if (!isnull && !compare(elem_type, element, searched_elem, collation))
             {
-                continue;
-            }
-
-            if (!compare(elem_type, element, searched_elem, collation))
-            {
-                positions[positions_size++] = pos;
+                positions[positions_size++] = Int32GetDatum(pos);
             }
 
             pos++;
@@ -700,8 +701,13 @@ array_filter(PG_FUNCTION_ARGS)
     {
         PG_RETURN_ARRAYTYPE_P(construct_empty_array(elem_type));
     }
+
+    if (size > PG_ARRAY_SEARCH_MAX_ALLOWED_SIZE)
+    {
+        ereport(ERROR, errmsg("array size exceeds the maximum allowed (%zu)", PG_ARRAY_SEARCH_MAX_ALLOWED_SIZE));
+    }
     
-    result = palloc(size*sizeof(Datum));
+    result = (Datum*)palloc(sizeof(Datum)*size);
     result_size = 0;
 
 	collation = PG_GET_COLLATION();
@@ -778,8 +784,13 @@ array_reject(PG_FUNCTION_ARGS)
     {
         PG_RETURN_ARRAYTYPE_P(construct_empty_array(elem_type));
     }
+
+    if (size > PG_ARRAY_SEARCH_MAX_ALLOWED_SIZE)
+    {
+        ereport(ERROR, errmsg("array size exceeds the maximum allowed (%zu)", PG_ARRAY_SEARCH_MAX_ALLOWED_SIZE));
+    }
     
-    result = palloc(size*sizeof(Datum));
+    result = (Datum*)palloc(sizeof(Datum)*size);
     result_size = 0;
 
 	collation = PG_GET_COLLATION();
@@ -863,8 +874,13 @@ array_partition(PG_FUNCTION_ARGS)
     {
         PG_RETURN_ARRAYTYPE_P(construct_empty_array(elem_type));
     }
+
+    if (size > PG_ARRAY_SEARCH_MAX_ALLOWED_SIZE / 2)
+    {
+        ereport(ERROR, errmsg("array size exceeds the maximum allowed (%zu)", PG_ARRAY_SEARCH_MAX_ALLOWED_SIZE / 2));
+    }
     
-    result = palloc(size*sizeof(Datum)*2);
+    result = (Datum*)palloc(sizeof(Datum)*size*2);
     size_ok = 0;
     size_no = 0;
 
@@ -900,7 +916,7 @@ array_partition(PG_FUNCTION_ARGS)
 
     size_max = (size_ok > size_no) ? size_ok : size_no;
 
-    result_nulls = palloc0(sizeof(bool) * size_max * 2);
+    result_nulls = (bool*)palloc0(sizeof(bool)*size_max*2);
 
     dims[1] = size_max;
 
@@ -985,12 +1001,7 @@ array_index_of(PG_FUNCTION_ARGS)
 
     while (array_iterate(iterator, &element, &isnull))
     {
-        if (isnull)
-        {
-            continue;
-        }
-
-        if (!compare(elem_type, element, searched_elem, collation))
+        if (!isnull && !compare(elem_type, element, searched_elem, collation))
         {
             array_free_iterator(iterator);
             PG_RETURN_INT32(pos);
@@ -1057,12 +1068,7 @@ array_last_index_of(PG_FUNCTION_ARGS)
 
     while (array_iterate(iterator, &element, &isnull))
     {
-        if (isnull)
-        {
-            continue;
-        }
-
-        if (!compare(elem_type, element, searched_elem, collation))
+        if (!isnull && !compare(elem_type, element, searched_elem, collation))
         {
             position = pos;
         }

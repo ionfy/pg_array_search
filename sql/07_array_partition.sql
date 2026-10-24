@@ -7,3 +7,4 @@ SELECT array_partition(ARRAY['foo', 'bar', 'baz'], 'x == "foobar"');
 SELECT array_partition(ARRAY[]::integer[], 'x % 3 = 1');
 SELECT array_partition(NULL::integer[], 'x % 3 = 1');
 SELECT array_partition(ARRAY[1, 2, 3], NULL);
+SELECT array_partition(array_fill(1::int, ARRAY[67108864]), 'x = 1');
