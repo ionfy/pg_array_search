@@ -13,7 +13,7 @@ REGRESS = 01_pg_array_search       \
 			09_array_last_index_of \
 			10_predicate
 
-TAP_TESTS = t/001_basic.pl t/002_large.pl
+TAP_TESTS = t/001_basic.pl t/002_large.pl t/003_transaction.pl
 
 PG_CONFIG = pg_config
 PGXS := $(shell $(PG_CONFIG) --pgxs)
