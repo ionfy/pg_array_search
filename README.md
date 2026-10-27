@@ -6,11 +6,11 @@
 
 Для сборки и установки используйте команду:
 ```bash
-make && make install
+make USE_PGXS=1 && make USE_PGXS=1 install
 ```
 Для запуска тестов используйте команду:
 ```bash
-make installcheck
+make USE_PGXS=1 installcheck
 ```
 
 Или запустите скрипт install_and_test.sh
