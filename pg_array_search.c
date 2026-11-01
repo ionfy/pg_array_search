@@ -83,7 +83,9 @@ static int32 compare(Oid type, Datum obj1, Datum obj2, Oid collation)
         break;
 
     default:
-        ereport(ERROR, errmsg("unsupported type for comparison"));
+        ereport(ERROR, (errmsg("unsupported data type for comparison"),
+                        errdetail("Data type %s is not supported.",
+                            format_type_be(type))));
     }
     
     return cmp;
@@ -98,14 +100,16 @@ static Datum parse_item(const char *data, int len, int* pos, Oid item_type)
 
     if ((*pos) >= len)
     {
-        ereport(ERROR, errmsg("predicate: expected constant"));
+        ereport(ERROR, (errmsg("incorrect predicate syntax"),
+                            errdetail("Expected a constant value, but reached the end of the expression.")));
     }
 
-    if (data[(*pos)] == '\"')
+    if (item_type == TEXTOID || item_type == VARCHAROID || item_type == BPCHAROID)
     {
-        if (!(item_type == TEXTOID || item_type == VARCHAROID || item_type == BPCHAROID))
+        if (data[(*pos)] != '\"')
         {
-            ereport(ERROR, errmsg("predicate: array and constant type mismatch"));
+            ereport(ERROR, (errmsg("incorrect predicate syntax"),
+                            errdetail("Double quotes were expected.")));
         }
         
         (*pos)++;
@@ -115,7 +119,8 @@ static Datum parse_item(const char *data, int len, int* pos, Oid item_type)
 	    }
         if ((*pos) + item_len >= len)
         {
-            ereport(ERROR, errmsg("predicate: expected end of string ( \" )"));
+            ereport(ERROR, (errmsg("incorrect predicate syntax"),
+                            errdetail("Expected the end of the string (\"), but reached the end of the expression.")));
         }
 
         buf = (char*)palloc(sizeof(char)*(item_len+1));
@@ -135,20 +140,18 @@ static Datum parse_item(const char *data, int len, int* pos, Oid item_type)
             item = DirectFunctionCall3(bpcharin, CStringGetDatum(buf), ObjectIdGetDatum(BPCHAROID), Int32GetDatum(-1));
             break;
         default:
-            ereport(ERROR, errmsg("predicate: array and constant type mismatch"));
+            ereport(ERROR, (errmsg("incorrect predicate syntax"),
+                            errdetail("Array element type %s is not a supported string type.",
+                                format_type_be(item_type))));
         }
 
         (*pos) += item_len + 1;
 
         pfree(buf);
     }
-    else
+    else if (item_type == INT2OID || item_type == INT4OID || item_type == INT8OID ||
+            item_type == FLOAT4OID || item_type == FLOAT8OID || item_type == NUMERICOID)
     {
-        if (!(item_type == INT2OID || item_type == INT4OID || item_type == INT8OID ||
-            item_type == FLOAT4OID || item_type == FLOAT8OID || item_type == NUMERICOID))
-        {
-            ereport(ERROR, errmsg("predicate: array and constant type mismatch"));
-        }
         
         if ((*pos) + item_len < len && data[(*pos) + item_len] == '-')
         {
@@ -163,7 +166,8 @@ static Datum parse_item(const char *data, int len, int* pos, Oid item_type)
             {
                 if (is_float)
                 {
-                    ereport(ERROR, errmsg("predicate: only 1 decimal point is allowed"));
+                    ereport(ERROR, (errmsg("incorrect predicate syntax"),
+                                    errdetail("A numeric constant cannot contain more than one decimal point.")));
                 }
                 is_float = 1;
             }
@@ -172,17 +176,20 @@ static Datum parse_item(const char *data, int len, int* pos, Oid item_type)
 
         if (item_len == 0)
         {
-            ereport(ERROR, errmsg("predicate: expected number"));
+            ereport(ERROR, (errmsg("incorrect predicate syntax"),
+                            errdetail("Expected a numeric value.")));
         }
 
         if (item_len == 1 && data[(*pos)] == '-')
         {
-            ereport(ERROR, errmsg("predicate: expected number"));
+            ereport(ERROR, (errmsg("incorrect predicate syntax"),
+                            errdetail("Expected a numeric value.")));
         }
 
         if (is_float && (item_type == INT2OID || item_type == INT4OID || item_type == INT8OID))
         {
-            ereport(ERROR, errmsg("predicate: array and constant type mismatch"));
+            ereport(ERROR, (errmsg("incorrect predicate syntax"),
+                            errdetail("Cannot compare an integer array with a floating-point value.")));
         }
 
         buf = (char*)palloc(sizeof(char)*(item_len+1));
@@ -210,12 +217,20 @@ static Datum parse_item(const char *data, int len, int* pos, Oid item_type)
                 item = DirectFunctionCall3(numeric_in, CStringGetDatum(buf), ObjectIdGetDatum(NUMERICOID), Int32GetDatum(-1));
                 break;
             default:
-                ereport(ERROR, errmsg("predicate: array and constant type mismatch"));
+                ereport(ERROR, (errmsg("incorrect predicate syntax"),
+                            errdetail("Array element type %s is not a supported numeric type.",
+                                format_type_be(item_type))));
             }
 
         (*pos) += item_len;
 
         pfree(buf);
+    }
+    else
+    {
+        ereport(ERROR, (errmsg("incorrect predicate syntax"),
+                            errdetail("Array element type %s is not supported.",
+                                format_type_be(item_type))));
     }
 
     return item;
@@ -225,7 +240,8 @@ static predicate_op parse_operation(const char *data, int len, int* pos)
 {
     if ((*pos) >= len)
     {
-        ereport(ERROR, errmsg("predicate: expected operation"));
+        ereport(ERROR, (errmsg("incorrect predicate syntax"),
+                            errdetail("Expected an operation, but reached the end of the expression.")));
     }
     switch (data[(*pos)])
     {
@@ -237,9 +253,10 @@ static predicate_op parse_operation(const char *data, int len, int* pos)
         (*pos)++;
         return EQ_OP;
     case '!':
-        if (!((*pos) + 1 >= len && data[(*pos) + 1] == '='))
+        if (((*pos) + 1 >= len) || (data[(*pos) + 1] != '='))
         {
-            ereport(ERROR, errmsg("predicate: unsupported operation"));
+            ereport(ERROR, (errmsg("incorrect predicate syntax"),
+                            errdetail("Unsupported operation.")));
         }
         (*pos)+=2;
         return N_EQ_OP;
@@ -263,9 +280,11 @@ static predicate_op parse_operation(const char *data, int len, int* pos)
         (*pos)++;
         return MOD_OP;
     default:
-        ereport(ERROR, errmsg("predicate: unsupported operation"));
+        ereport(ERROR, (errmsg("incorrect predicate syntax"),
+                            errdetail("Unsupported operation.")));
     }
-    ereport(ERROR, errmsg("predicate: unsupported operation"));
+    ereport(ERROR, (errmsg("incorrect predicate syntax"),
+                            errdetail("Unsupported operation.")));
 }
 
 static predicate parse_predicate(const char *data, int len, Oid item_type)
@@ -294,7 +313,8 @@ static predicate parse_predicate(const char *data, int len, Oid item_type)
 
     if (!any_val)
     {
-        ereport(ERROR, errmsg("predicate: expected name"));
+        ereport(ERROR, (errmsg("incorrect predicate syntax"),
+                        errdetail("Expected a variable name.")));
     }
 
     while (pos < len && data[pos] == ' ')
@@ -303,7 +323,8 @@ static predicate parse_predicate(const char *data, int len, Oid item_type)
     }
     if (pos >= len)
     {
-        ereport(ERROR, errmsg("predicate: expected operation"));
+        ereport(ERROR, (errmsg("incorrect predicate syntax"),
+                        errdetail("Expected an operation, but reached the end of the expression.")));
     }
 
     pred.op = parse_operation(data, len, &pos);
@@ -311,13 +332,15 @@ static predicate parse_predicate(const char *data, int len, Oid item_type)
     if ((item_type == TEXTOID || item_type == VARCHAROID || item_type == BPCHAROID) &&
         !(pred.op == EQ_OP || pred.op == N_EQ_OP))
     {
-        ereport(ERROR, errmsg("predicate: unsupported array type for operation"));
+        ereport(ERROR, (errmsg("incorrect predicate syntax"),
+                        errdetail("String types support equality operators only.")));
     }
     
     if (pred.op == MOD_OP &&
         !(item_type == INT2OID || item_type == INT4OID || item_type == INT8OID))
     {
-        ereport(ERROR, errmsg("predicate: unsupported array type for operation"));
+        ereport(ERROR, (errmsg("incorrect predicate syntax"),
+                        errdetail("Operator '%%' can only be used with integer array types.")));
     }
 
 
@@ -327,7 +350,8 @@ static predicate parse_predicate(const char *data, int len, Oid item_type)
     }
     if (pos >= len)
     {
-        ereport(ERROR, errmsg("predicate: expected constant"));
+        ereport(ERROR, (errmsg("incorrect predicate syntax"),
+                        errdetail("Expected a constant value, but reached the end of the expression.")));
     }
 
     pred.obj1 = parse_item(data, len, &pos, item_type);
@@ -345,17 +369,20 @@ static predicate parse_predicate(const char *data, int len, Oid item_type)
         }
         else
         {
-            ereport(ERROR, errmsg("predicate: expected ="));
+            ereport(ERROR, (errmsg("incorrect predicate syntax"),
+                        errdetail("Expected '=' operator.")));
         }
     }
     
     if (pred.op != MOD_OP)
     {
-        ereport(ERROR, errmsg("predicate: expected end of text"));
+        ereport(ERROR, (errmsg("incorrect predicate syntax"),
+                        errdetail("Expected the end of the expression.")));
     }
     if (data[pos] != '=')
     {
-        ereport(ERROR, errmsg("predicate: expected ="));
+        ereport(ERROR, (errmsg("incorrect predicate syntax"),
+                        errdetail("Expected '=' operator.")));
     }
 
     pos++;
@@ -366,7 +393,8 @@ static predicate parse_predicate(const char *data, int len, Oid item_type)
     }
     if (pos >= len)
     {
-        ereport(ERROR, errmsg("predicate: expected second constant"));
+        ereport(ERROR, (errmsg("incorrect predicate syntax"),
+                        errdetail("Expected a constant value after '=', but reached the end of the expression.")));
     }
 
     pred.obj2 = parse_item(data, len, &pos, item_type);
@@ -377,7 +405,8 @@ static predicate parse_predicate(const char *data, int len, Oid item_type)
     }
     if (pos < len)
     {
-        ereport(ERROR, errmsg("predicate: expected end of text"));
+        ereport(ERROR, (errmsg("incorrect predicate syntax"),
+                        errdetail("Expected the end of the expression.")));
     }
 
     return pred;
@@ -409,29 +438,32 @@ static bool process_predicate(Datum obj, Oid obj_type, predicate pred, Oid colla
         case INT2OID:
             if (DatumGetInt16(pred.obj1) == 0)
             {
-                ereport(ERROR, errmsg("predicate: division by zero"));
+                ereport(ERROR, (errmsg("incorrect predicate syntax"),
+                        errdetail("Division by zero is not allowed.")));
             }
             return compare(obj_type, Int16GetDatum(DatumGetInt16(obj) % DatumGetInt16(pred.obj1)), pred.obj2, collation) == 0;
         case INT4OID:
             if (DatumGetInt32(pred.obj1) == 0)
             {
-                ereport(ERROR, errmsg("predicate: division by zero"));
+                ereport(ERROR, (errmsg("incorrect predicate syntax"),
+                        errdetail("Division by zero is not allowed.")));
             }
             return compare(obj_type, Int32GetDatum(DatumGetInt32(obj) % DatumGetInt32(pred.obj1)), pred.obj2, collation) == 0;
         case INT8OID:
             if (DatumGetInt64(pred.obj1) == 0)
             {
-                ereport(ERROR, errmsg("predicate: division by zero"));
+                ereport(ERROR, (errmsg("incorrect predicate syntax"),
+                        errdetail("Division by zero is not allowed.")));
             }
             return compare(obj_type, Int64GetDatum(DatumGetInt64(obj) % DatumGetInt64(pred.obj1)), pred.obj2, collation) == 0;
         default:
-            ereport(ERROR, errmsg("predicate: unsupported operation"));
+            ereport(ERROR, errmsg("unsupported operator for executing the predicate"));
         }
         break;
     default:
-        ereport(ERROR, errmsg("predicate: unsupported operation"));
+        ereport(ERROR, errmsg("unsupported operator for executing the predicate"));
     }
-    ereport(ERROR, errmsg("predicate: unsupported operation"));
+    ereport(ERROR, errmsg("unsupported operator for executing the predicate"));
 }
 
 Datum
