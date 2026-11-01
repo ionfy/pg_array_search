@@ -4,12 +4,33 @@ SELECT array_contains(ARRAY[1, 2, 3, 4], 2);
  t
 (1 row)
 
+SELECT array_contains(ARRAY[1, 2, 3, 4], 0);
+ array_contains 
+----------------
+ f
+(1 row)
+
+SELECT array_contains(ARRAY['i', 'j', 'k'], 'j');
+ array_contains 
+----------------
+ t
+(1 row)
+
 SELECT array_contains(ARRAY['i', 'j', 'k'], 'z');
  array_contains 
 ----------------
  f
 (1 row)
 
+SELECT array_contains(ARRAY['i', 'j', 'k'], 2);
+ERROR:  function array_contains(text[], integer) does not exist
+LINE 1: SELECT array_contains(ARRAY['i', 'j', 'k'], 2);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+SELECT array_contains(ARRAY[1, 2, 3, 4], 'j');
+ERROR:  invalid input syntax for type integer: "j"
+LINE 1: SELECT array_contains(ARRAY[1, 2, 3, 4], 'j');
+                                                 ^
 SELECT array_contains(ARRAY[NULL, 1], NULL);
  array_contains 
 ----------------
@@ -28,7 +49,19 @@ SELECT array_contains(ARRAY[]::integer[], 1);
  f
 (1 row)
 
+SELECT array_contains(ARRAY[]::integer[], NULL);
+ array_contains 
+----------------
+ f
+(1 row)
+
 SELECT array_contains(NULL::integer[], 1);
+ array_contains 
+----------------
+ 
+(1 row)
+
+SELECT array_contains(NULL::integer[], NULL);
  array_contains 
 ----------------
  

@@ -1,7 +1,12 @@
 SELECT array_index_of(ARRAY[1, 3, 2, 3, 4], 3);
-SELECT array_index_of(ARRAY['i', 'j', 'i', 'k'], 'a');
-SELECT array_index_of(ARRAY[1, NULL, 2, 3, NULL], NULL);
+SELECT array_index_of(ARRAY[1, 3, 2, 3, 4], 0);
+SELECT array_index_of(ARRAY['i', 'a', 'j', 'a', 'k'], 'a');
+SELECT array_index_of(ARRAY['i', 'j', 'k'], 'a');
+SELECT array_index_of(ARRAY[1, 3, 2, 3, 4], 'j');
+SELECT array_index_of(ARRAY['i', 'j', 'k'], 1);
+SELECT array_index_of(ARRAY[NULL, 1, 2, 3, NULL], NULL);
 SELECT array_index_of(ARRAY[1, 2], NULL);
 SELECT array_index_of(ARRAY[]::integer[], 1);
 SELECT array_index_of(NULL::integer[], 2);
-SELECT array_index_of(ARRAY[[1], [2]], 2);
+SELECT array_index_of(NULL::integer[], NULL);
+SELECT array_index_of(ARRAY[[1], [2]], 1);

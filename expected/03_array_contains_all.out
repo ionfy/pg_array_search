@@ -4,12 +4,34 @@ SELECT array_contains_all(ARRAY[1, 2, 3, 4], ARRAY[1, 2]);
  t
 (1 row)
 
+SELECT array_contains_all(ARRAY[1, 2, 3, 4], ARRAY[1, 0]);
+ array_contains_all 
+--------------------
+ f
+(1 row)
+
+SELECT array_contains_all(ARRAY['i', 'j', 'k'], ARRAY['i', 'k']);
+ array_contains_all 
+--------------------
+ t
+(1 row)
+
 SELECT array_contains_all(ARRAY['i', 'j', 'k'], ARRAY['i', 'a']);
  array_contains_all 
 --------------------
  f
 (1 row)
 
+SELECT array_contains_all(ARRAY[1, 2], ARRAY['j', 'k']);
+ERROR:  function array_contains_all(integer[], text[]) does not exist
+LINE 1: SELECT array_contains_all(ARRAY[1, 2], ARRAY['j', 'k']);
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+SELECT array_contains_all(ARRAY['i', 'j', 'k'], ARRAY[1, 2]);
+ERROR:  function array_contains_all(text[], integer[]) does not exist
+LINE 1: SELECT array_contains_all(ARRAY['i', 'j', 'k'], ARRAY[1, 2])...
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
 SELECT array_contains_all(ARRAY[1, 2, 3, NULL], ARRAY[1, NULL]);
  array_contains_all 
 --------------------
@@ -29,6 +51,12 @@ SELECT array_contains_all(ARRAY[]::integer[], ARRAY[1, 2]);
 (1 row)
 
 SELECT array_contains_all(NULL::integer[], ARRAY[1, 2]);
+ array_contains_all 
+--------------------
+ 
+(1 row)
+
+SELECT array_contains_all(NULL::integer[], NULL::integer[]);
  array_contains_all 
 --------------------
  

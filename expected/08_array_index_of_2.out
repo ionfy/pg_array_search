@@ -1,0 +1,66 @@
+SELECT array_index_of(ARRAY[1, 3, 2, 3, 4], 3);
+ array_index_of 
+----------------
+              2
+(1 row)
+
+SELECT array_index_of(ARRAY[1, 3, 2, 3, 4], 0);
+ array_index_of 
+----------------
+             -1
+(1 row)
+
+SELECT array_index_of(ARRAY['i', 'a', 'j', 'a', 'k'], 'a');
+ array_index_of 
+----------------
+              2
+(1 row)
+
+SELECT array_index_of(ARRAY['i', 'j', 'k'], 'a');
+ array_index_of 
+----------------
+             -1
+(1 row)
+
+SELECT array_index_of(ARRAY[1, 3, 2, 3, 4], 'j');
+ERROR:  invalid input syntax for type integer: "j"
+LINE 1: SELECT array_index_of(ARRAY[1, 3, 2, 3, 4], 'j');
+                                                    ^
+SELECT array_index_of(ARRAY['i', 'j', 'k'], 1);
+ERROR:  function array_index_of(text[], integer) does not exist
+LINE 1: SELECT array_index_of(ARRAY['i', 'j', 'k'], 1);
+               ^
+DETAIL:  No function of that name accepts the given argument types.
+HINT:  You might need to add explicit type casts.
+SELECT array_index_of(ARRAY[NULL, 1, 2, 3, NULL], NULL);
+ array_index_of 
+----------------
+              1
+(1 row)
+
+SELECT array_index_of(ARRAY[1, 2], NULL);
+ array_index_of 
+----------------
+             -1
+(1 row)
+
+SELECT array_index_of(ARRAY[]::integer[], 1);
+ array_index_of 
+----------------
+             -1
+(1 row)
+
+SELECT array_index_of(NULL::integer[], 2);
+ array_index_of 
+----------------
+               
+(1 row)
+
+SELECT array_index_of(NULL::integer[], NULL);
+ array_index_of 
+----------------
+               
+(1 row)
+
+SELECT array_index_of(ARRAY[[1], [2]], 1);
+ERROR:  multidimensional arrays is not supported
