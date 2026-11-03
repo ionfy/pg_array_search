@@ -726,6 +726,11 @@ array_filter(PG_FUNCTION_ARGS)
 
     array = PG_GETARG_ARRAYTYPE_P(0);
 	elem_type = ARR_ELEMTYPE(array);
+
+    if (ARR_NDIM(array) > 1)
+    {
+        ereport(ERROR, errmsg("multidimensional arrays is not supported"));
+    }
 	
     size = ArrayGetNItems(ARR_NDIM(array), ARR_DIMS(array));
 
@@ -809,6 +814,11 @@ array_reject(PG_FUNCTION_ARGS)
 
     array = PG_GETARG_ARRAYTYPE_P(0);
 	elem_type = ARR_ELEMTYPE(array);
+
+    if (ARR_NDIM(array) > 1)
+    {
+        ereport(ERROR, errmsg("multidimensional arrays is not supported"));
+    }
 	
     size = ArrayGetNItems(ARR_NDIM(array), ARR_DIMS(array));
 
@@ -897,6 +907,11 @@ array_partition(PG_FUNCTION_ARGS)
 
     array = PG_GETARG_ARRAYTYPE_P(0);
 	elem_type = ARR_ELEMTYPE(array);
+
+    if (ARR_NDIM(array) > 1)
+    {
+        ereport(ERROR, errmsg("multidimensional arrays is not supported"));
+    }
 	
 	get_typlenbyvalalign(elem_type, &typlen, &typbyval, &typalign);
 
