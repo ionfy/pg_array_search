@@ -122,5 +122,5 @@ make USE_PGXS=1 installcheck
     - array_filter(ARRAY[1, 2, 3], '4 == x') - не соответствует ни одному из вариантов предиката
 
 ## Ограничения
-- Поддерживаются массивы только с числовыми и строковыми типами элементов
+- Поддерживаются массивы только с числовыми и строковыми типами элементов (smallint, integer, bigint, real, double precision, numeric, text, character varying, character)
 - Максимальный размер массива ограничен для функций array_find_all, array_filter, array_reject, array_partition

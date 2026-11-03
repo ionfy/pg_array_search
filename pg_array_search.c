@@ -40,6 +40,41 @@ typedef struct {
     Datum obj2;
 } predicate;
 
+static inline bool is_int_type_supported(Oid type)
+{
+    return type == INT2OID || type == INT4OID || type == INT8OID;
+}
+
+static inline bool is_numeric_type_supported(Oid type)
+{
+    return is_int_type_supported(type) ||
+            type == FLOAT4OID || type == FLOAT8OID || type == NUMERICOID;
+}
+
+static inline bool is_string_type_supported(Oid type)
+{
+    return type == TEXTOID || type == VARCHAROID || type == BPCHAROID;
+}
+
+static inline bool is_type_supported(Oid type)
+{
+    return is_numeric_type_supported(type) || is_string_type_supported(type);
+}
+
+static void check_supported_type(Oid type)
+{
+    if (is_type_supported(type))
+    {
+        return;
+    }
+    
+    ereport(ERROR, (errmsg("unsupported data type"),
+                    errdetail("Data type %s is not supported.",
+                        format_type_be(type)),
+                    errhint("Supported data types: smallint, integer, bigint, "
+                        "real, double precision, numeric, text, character varying, character.")));
+}
+
 static int32 compare(Oid type, Datum obj1, Datum obj2, Oid collation)
 {
     int32 cmp;
@@ -87,7 +122,7 @@ static int32 compare(Oid type, Datum obj1, Datum obj2, Oid collation)
                         errdetail("Data type %s is not supported.",
                             format_type_be(type))));
     }
-    
+
     return cmp;
 }
 
@@ -104,7 +139,7 @@ static Datum parse_item(const char *data, int len, int* pos, Oid item_type)
                             errdetail("Expected a constant value, but reached the end of the expression.")));
     }
 
-    if (item_type == TEXTOID || item_type == VARCHAROID || item_type == BPCHAROID)
+    if (is_string_type_supported(item_type))
     {
         if (data[(*pos)] != '\"')
         {
@@ -140,6 +175,7 @@ static Datum parse_item(const char *data, int len, int* pos, Oid item_type)
             item = DirectFunctionCall3(bpcharin, CStringGetDatum(buf), ObjectIdGetDatum(BPCHAROID), Int32GetDatum(-1));
             break;
         default:
+            pfree(buf);
             ereport(ERROR, (errmsg("incorrect predicate syntax"),
                             errdetail("Array element type %s is not a supported string type.",
                                 format_type_be(item_type))));
@@ -149,8 +185,7 @@ static Datum parse_item(const char *data, int len, int* pos, Oid item_type)
 
         pfree(buf);
     }
-    else if (item_type == INT2OID || item_type == INT4OID || item_type == INT8OID ||
-            item_type == FLOAT4OID || item_type == FLOAT8OID || item_type == NUMERICOID)
+    else if (is_numeric_type_supported(item_type))
     {
         
         if ((*pos) + item_len < len && data[(*pos) + item_len] == '-')
@@ -217,6 +252,7 @@ static Datum parse_item(const char *data, int len, int* pos, Oid item_type)
                 item = DirectFunctionCall3(numeric_in, CStringGetDatum(buf), ObjectIdGetDatum(NUMERICOID), Int32GetDatum(-1));
                 break;
             default:
+                pfree(buf);
                 ereport(ERROR, (errmsg("incorrect predicate syntax"),
                             errdetail("Array element type %s is not a supported numeric type.",
                                 format_type_be(item_type))));
@@ -329,7 +365,7 @@ static predicate parse_predicate(const char *data, int len, Oid item_type)
 
     pred.op = parse_operation(data, len, &pos);
 
-    if ((item_type == TEXTOID || item_type == VARCHAROID || item_type == BPCHAROID) &&
+    if (is_string_type_supported(item_type) &&
         !(pred.op == EQ_OP || pred.op == N_EQ_OP))
     {
         ereport(ERROR, (errmsg("incorrect predicate syntax"),
@@ -337,7 +373,7 @@ static predicate parse_predicate(const char *data, int len, Oid item_type)
     }
     
     if (pred.op == MOD_OP &&
-        !(item_type == INT2OID || item_type == INT4OID || item_type == INT8OID))
+        !is_int_type_supported(item_type))
     {
         ereport(ERROR, (errmsg("incorrect predicate syntax"),
                         errdetail("Operator '%%' can only be used with integer array types.")));
@@ -414,6 +450,8 @@ static predicate parse_predicate(const char *data, int len, Oid item_type)
 
 static bool process_predicate(Datum obj, Oid obj_type, predicate pred, Oid collation)
 {
+    Datum mod;
+
     Assert(pred.obj_type == obj_type);
 
     switch (pred.op)
@@ -441,21 +479,24 @@ static bool process_predicate(Datum obj, Oid obj_type, predicate pred, Oid colla
                 ereport(ERROR, (errmsg("incorrect predicate syntax"),
                         errdetail("Division by zero is not allowed.")));
             }
-            return compare(obj_type, Int16GetDatum(DatumGetInt16(obj) % DatumGetInt16(pred.obj1)), pred.obj2, collation) == 0;
+            mod = DirectFunctionCall2(int2mod, obj, pred.obj1);
+            return compare(obj_type, mod, pred.obj2, collation) == 0;
         case INT4OID:
             if (DatumGetInt32(pred.obj1) == 0)
             {
                 ereport(ERROR, (errmsg("incorrect predicate syntax"),
                         errdetail("Division by zero is not allowed.")));
             }
-            return compare(obj_type, Int32GetDatum(DatumGetInt32(obj) % DatumGetInt32(pred.obj1)), pred.obj2, collation) == 0;
+            mod = DirectFunctionCall2(int4mod, obj, pred.obj1);
+            return compare(obj_type, mod, pred.obj2, collation) == 0;
         case INT8OID:
             if (DatumGetInt64(pred.obj1) == 0)
             {
                 ereport(ERROR, (errmsg("incorrect predicate syntax"),
                         errdetail("Division by zero is not allowed.")));
             }
-            return compare(obj_type, Int64GetDatum(DatumGetInt64(obj) % DatumGetInt64(pred.obj1)), pred.obj2, collation) == 0;
+            mod = DirectFunctionCall2(int8mod, obj, pred.obj1);
+            return compare(obj_type, mod, pred.obj2, collation) == 0;
         default:
             ereport(ERROR, errmsg("unsupported operator for executing the predicate"));
         }
@@ -484,6 +525,8 @@ array_contains(PG_FUNCTION_ARGS)
 
     array = PG_GETARG_ARRAYTYPE_P(0);
 	elem_type = ARR_ELEMTYPE(array);
+
+    check_supported_type(elem_type);
 
     iterator = array_create_iterator(array, 0, NULL);
 
@@ -547,6 +590,8 @@ array_contains_all(PG_FUNCTION_ARGS)
     searched_array = PG_GETARG_ARRAYTYPE_P(1);
 
     elem_type = ARR_ELEMTYPE(searched_array);
+
+    check_supported_type(elem_type);
 
     Assert(elem_type == ARR_ELEMTYPE(array));
 
@@ -634,6 +679,8 @@ array_find_all(PG_FUNCTION_ARGS)
     size = ArrayGetNItems(ARR_NDIM(array), ARR_DIMS(array));
 
 	elem_type = ARR_ELEMTYPE(array);
+
+    check_supported_type(elem_type);
 
     if (size <= 0)
     {
@@ -727,6 +774,8 @@ array_filter(PG_FUNCTION_ARGS)
     array = PG_GETARG_ARRAYTYPE_P(0);
 	elem_type = ARR_ELEMTYPE(array);
 
+    check_supported_type(elem_type);
+
     if (ARR_NDIM(array) > 1)
     {
         ereport(ERROR, errmsg("multidimensional arrays is not supported"));
@@ -814,6 +863,8 @@ array_reject(PG_FUNCTION_ARGS)
 
     array = PG_GETARG_ARRAYTYPE_P(0);
 	elem_type = ARR_ELEMTYPE(array);
+
+    check_supported_type(elem_type);
 
     if (ARR_NDIM(array) > 1)
     {
@@ -907,6 +958,8 @@ array_partition(PG_FUNCTION_ARGS)
 
     array = PG_GETARG_ARRAYTYPE_P(0);
 	elem_type = ARR_ELEMTYPE(array);
+
+    check_supported_type(elem_type);
 
     if (ARR_NDIM(array) > 1)
     {
@@ -1022,6 +1075,8 @@ array_index_of(PG_FUNCTION_ARGS)
 
 	elem_type = ARR_ELEMTYPE(array);
 
+    check_supported_type(elem_type);
+
     pos = 1;
 
     iterator = array_create_iterator(array, 0, NULL);
@@ -1087,6 +1142,8 @@ array_last_index_of(PG_FUNCTION_ARGS)
     }
     
 	elem_type = ARR_ELEMTYPE(array);
+
+    check_supported_type(elem_type);
 
     pos = 1;
 
