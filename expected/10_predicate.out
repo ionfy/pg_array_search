@@ -1,9 +1,9 @@
 SELECT array_filter(ARRAY[1, 2, 3], 'some value > 1');
 ERROR:  incorrect predicate syntax
-DETAIL:  Unsupported operation.
+DETAIL:  Expected an operation, got value.
 SELECT array_filter(ARRAY[1, 2, 3], 'x > 1.5');
 ERROR:  incorrect predicate syntax
-DETAIL:  Cannot compare an integer array with a floating-point value.
+DETAIL:  Expected an integer value, got 1.5.
 SELECT array_filter(ARRAY[1.1, 1.2, 1.3], 'x % 2 = 1');
 ERROR:  incorrect predicate syntax
 DETAIL:  Operator '%' can only be used with integer array types.
@@ -12,10 +12,10 @@ ERROR:  incorrect predicate syntax
 DETAIL:  String types support equality operators only.
 SELECT array_filter(ARRAY[1, 2, 3], 'x == "2"');
 ERROR:  incorrect predicate syntax
-DETAIL:  Expected a numeric value.
+DETAIL:  Expected an integer value, got "2".
 SELECT array_filter(ARRAY[1, 2, 3], 'x + 1 = 2');
 ERROR:  incorrect predicate syntax
-DETAIL:  Unsupported operation.
+DETAIL:  Expected an operation, got +.
 SELECT array_filter(ARRAY[1, 2, 3], 'x');
 ERROR:  incorrect predicate syntax
 DETAIL:  Expected an operation, but reached the end of the expression.
@@ -24,10 +24,12 @@ ERROR:  incorrect predicate syntax
 DETAIL:  Expected a variable name.
 SELECT array_filter(ARRAY['ab', 'cd', 'ef'], 'x == "cd');
 ERROR:  incorrect predicate syntax
-DETAIL:  Expected the end of the string ("), but reached the end of the expression.
+DETAIL:  Expected a string value, got "cd.
+HINT:  String constants must be enclosed in double quotes, for example 'x == "abc"'.
 SELECT array_filter(ARRAY['ab', 'cd', 'ef'], 'x == cd');
 ERROR:  incorrect predicate syntax
-DETAIL:  Double quotes were expected.
+DETAIL:  Expected a string value, got cd.
+HINT:  String constants must be enclosed in double quotes, for example 'x == "abc"'.
 SELECT array_filter(ARRAY[1, 2, 3], 'x == ');
 ERROR:  incorrect predicate syntax
 DETAIL:  Expected a constant value, but reached the end of the expression.
@@ -45,10 +47,10 @@ ERROR:  incorrect predicate syntax
 DETAIL:  Expected a variable name.
 SELECT array_filter(ARRAY[1, 2, 3], 'x ! 2');
 ERROR:  incorrect predicate syntax
-DETAIL:  Unsupported operation.
+DETAIL:  Expected an operation, got !.
 SELECT array_filter(ARRAY[1, 2, 3], 'a % 2 = ');
 ERROR:  incorrect predicate syntax
-DETAIL:  Expected a constant value after '=', but reached the end of the expression.
+DETAIL:  Expected a constant value, but reached the end of the expression.
 SELECT array_filter(ARRAY[1, 2, 3], '              x               ==                2          ');
  array_filter 
 --------------

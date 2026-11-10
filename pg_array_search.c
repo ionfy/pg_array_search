@@ -45,6 +45,9 @@ typedef enum {
     TT_INT,
     TT_NUM,
     TT_STRING,
+    TT_NAN,
+    TT_INF,
+    TT_N_INF,
     TT_EQ_OP,
     TT_N_EQ_OP,
     TT_GR_OP,
@@ -201,10 +204,7 @@ static bool lexer_next_token_operation(token* tkn, lexer* lex)
     case '!':
         if (lex->pos + 1 < lex->len && lex->data[lex->pos + 1] != '=')
         {
-            lex->pos += 1;
-            tkn->len = 1;
-            tkn->type = TT_INVALID;
-            return 1;
+            return 0;
         }
         lex->pos += 2;
         tkn->len = 2;
@@ -375,6 +375,40 @@ static bool lexer_next_token_identifier(token* tkn, lexer* lex)
     return 1;
 }
 
+static bool lexer_next_token_special(token* tkn, lexer* lex)
+{
+    size_t special_len = 0;
+
+    while (lex->pos + special_len < lex->len &&
+            ((lex->data[lex->pos + special_len] >= 'a' && lex->data[lex->pos + special_len] <= 'z') ||
+            (lex->data[lex->pos + special_len] >= 'A' && lex->data[lex->pos + special_len] <= 'Z') ||
+            lex->data[lex->pos + special_len] == '-'))
+    {
+        special_len++;
+    }
+
+    if (special_len == 3 && pg_strncasecmp(lex->data + lex->pos, "nan", 3) == 0) {
+        tkn->type = TT_NAN;
+    } else if (special_len == 8 && pg_strncasecmp(lex->data + lex->pos, "infinity", 8) == 0) {
+        tkn->type = TT_INF;
+    } else if (special_len == 3 && pg_strncasecmp(lex->data + lex->pos, "inf", 3) == 0) {
+        tkn->type = TT_INF;
+    } else if (special_len == 9 && pg_strncasecmp(lex->data + lex->pos, "-infinity", 9) == 0) {
+        tkn->type = TT_N_INF;
+    } else if (special_len == 4 && pg_strncasecmp(lex->data + lex->pos, "-inf", 4) == 0) {
+        tkn->type = TT_N_INF;
+    } else {
+        return 0;
+    }
+
+    tkn->str = lex->data + lex->pos;
+    tkn->len = special_len;
+
+    lex->pos += special_len;
+
+    return 1;
+}
+
 static token lexer_next_token(lexer *lex) {
     token result;
     char ch;
@@ -401,6 +435,11 @@ static token lexer_next_token(lexer *lex) {
     }
 
     if (lexer_next_token_numeric(&result, lex))
+    {
+        return result;
+    }
+
+    if (lexer_next_token_special(&result, lex))
     {
         return result;
     }
@@ -438,19 +477,21 @@ static Datum datum_from_token(token tkn, Oid target_type)
     if (tkn.type != TT_STRING && is_string_type_supported(target_type))
     {
         ereport(ERROR, (errmsg("incorrect predicate syntax"),
-                        errdetail("Expected a string value, got %.*s", tkn.len, tkn.str)));
+                        errdetail("Expected a string value, got %.*s.", tkn.len, tkn.str),
+                        errhint("String constants must be enclosed in double quotes, for example \'x == \"abc\"\'.")));
     }
 
     if (tkn.type != TT_INT && is_int_type_supported(target_type))
     {
         ereport(ERROR, (errmsg("incorrect predicate syntax"),
-                        errdetail("Expected an integer value, got %.*s", tkn.len, tkn.str)));
+                        errdetail("Expected an integer value, got %.*s.", tkn.len, tkn.str)));
     }
 
-    if (tkn.type != TT_INT && tkn.type != TT_NUM && is_numeric_type_supported(target_type))
+    if (tkn.type != TT_INT && tkn.type != TT_NUM && tkn.type != TT_NAN &&
+        tkn.type != TT_INF && tkn.type != TT_N_INF && is_numeric_type_supported(target_type))
     {
         ereport(ERROR, (errmsg("incorrect predicate syntax"),
-                        errdetail("Expected a numeric value, got %.*s", tkn.len, tkn.str)));
+                        errdetail("Expected a numeric value, got %.*s.", tkn.len, tkn.str)));
     }
 
     buf = (char*)palloc(sizeof(char)*(tkn.len+1));
@@ -564,7 +605,7 @@ static predicate parse_predicate(const char *data, int len, Oid target_type)
         break;
     default:
         ereport(ERROR, (errmsg("incorrect predicate syntax"),
-                        errdetail("Expected an operation, got %.*s", curr_tkn.len, curr_tkn.str)));
+                        errdetail("Expected an operation, got %.*s.", curr_tkn.len, curr_tkn.str)));
     }
 
     if (is_string_type_supported(target_type) && pred.op != EQ_OP && pred.op != N_EQ_OP)
