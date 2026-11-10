@@ -780,6 +780,11 @@ array_filter(PG_FUNCTION_ARGS)
     {
         ereport(ERROR, errmsg("multidimensional arrays is not supported"));
     }
+
+    pred_text = PG_GETARG_TEXT_PP(1);
+    pred_buf_len = VARSIZE_ANY_EXHDR(pred_text);
+    pred_buf = VARDATA_ANY(pred_text);
+    pred = parse_predicate(pred_buf, pred_buf_len, elem_type);
 	
     size = ArrayGetNItems(ARR_NDIM(array), ARR_DIMS(array));
 
@@ -797,11 +802,6 @@ array_filter(PG_FUNCTION_ARGS)
     result_size = 0;
 
 	collation = PG_GET_COLLATION();
-
-    pred_text = PG_GETARG_TEXT_PP(1);
-    pred_buf_len = VARSIZE_ANY_EXHDR(pred_text);
-    pred_buf = VARDATA_ANY(pred_text);
-    pred = parse_predicate(pred_buf, pred_buf_len, elem_type);
 
     iterator = array_create_iterator(array, 0, NULL);
 
@@ -870,6 +870,11 @@ array_reject(PG_FUNCTION_ARGS)
     {
         ereport(ERROR, errmsg("multidimensional arrays is not supported"));
     }
+
+    pred_text = PG_GETARG_TEXT_PP(1);
+    pred_buf_len = VARSIZE_ANY_EXHDR(pred_text);
+    pred_buf = VARDATA_ANY(pred_text);
+    pred = parse_predicate(pred_buf, pred_buf_len, elem_type);
 	
     size = ArrayGetNItems(ARR_NDIM(array), ARR_DIMS(array));
 
@@ -887,11 +892,6 @@ array_reject(PG_FUNCTION_ARGS)
     result_size = 0;
 
 	collation = PG_GET_COLLATION();
-
-    pred_text = PG_GETARG_TEXT_PP(1);
-    pred_buf_len = VARSIZE_ANY_EXHDR(pred_text);
-    pred_buf = VARDATA_ANY(pred_text);
-    pred = parse_predicate(pred_buf, pred_buf_len, elem_type);
 
     iterator = array_create_iterator(array, 0, NULL);
 
@@ -965,6 +965,11 @@ array_partition(PG_FUNCTION_ARGS)
     {
         ereport(ERROR, errmsg("multidimensional arrays is not supported"));
     }
+
+    pred_text = PG_GETARG_TEXT_PP(1);
+    pred_buf_len = VARSIZE_ANY_EXHDR(pred_text);
+    pred_buf = VARDATA_ANY(pred_text);
+    pred = parse_predicate(pred_buf, pred_buf_len, elem_type);
 	
 	get_typlenbyvalalign(elem_type, &typlen, &typbyval, &typalign);
 
@@ -985,13 +990,6 @@ array_partition(PG_FUNCTION_ARGS)
     size_no = 0;
 
 	collation = PG_GET_COLLATION();
-
-    pred_text = PG_GETARG_TEXT_PP(1);
-
-    pred_buf_len = VARSIZE_ANY_EXHDR(pred_text);
-    pred_buf = VARDATA_ANY(pred_text);
-
-    pred = parse_predicate(pred_buf, pred_buf_len, elem_type);
 
     iterator = array_create_iterator(array, 0, NULL);
 
