@@ -40,6 +40,34 @@ typedef struct {
     Datum obj2;
 } predicate;
 
+typedef enum {
+    TT_IDENT,
+    TT_INT,
+    TT_NUM,
+    TT_STRING,
+    TT_EQ_OP,
+    TT_N_EQ_OP,
+    TT_GR_OP,
+    TT_EQ_GR_OP,
+    TT_LE_OP,
+    TT_EQ_LE_OP,
+    TT_MOD_OP,
+    TT_INVALID,
+    TT_EOF
+} token_type;
+
+typedef struct {
+    const char* str;
+    int len;
+    token_type type;
+} token;
+
+typedef struct {
+    const char *data;
+    int len;
+    int pos;
+} lexer;
+
 static inline bool is_int_type_supported(Oid type)
 {
     return type == INT2OID || type == INT4OID || type == INT8OID;
@@ -126,278 +154,444 @@ static int32 compare(Oid type, Datum obj1, Datum obj2, Oid collation)
     return cmp;
 }
 
-static Datum parse_item(const char *data, int len, int* pos, Oid item_type)
+static void lexer_init(lexer *lex, const char *data, int len)
 {
-    int item_len = 0;
-    Datum item;
-    bool is_float = 0;
-    char* buf;
+    lex->data = data;
+    lex->len = len;
+    lex->pos = 0;
+}
 
-    if ((*pos) >= len)
+static void lexer_skip_whitespace(lexer *lex)
+{
+    char ch;
+
+    while (lex->pos < lex->len)
     {
-        ereport(ERROR, (errmsg("incorrect predicate syntax"),
-                            errdetail("Expected a constant value, but reached the end of the expression.")));
+        ch = lex->data[lex->pos];
+        if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r')
+        {
+            lex->pos++;
+        }
+        else
+        {
+            break;
+        }
+    }
+}
+
+static bool lexer_next_token_operation(token* tkn, lexer* lex)
+{
+    tkn->str = lex->data + lex->pos;
+
+    switch (lex->data[lex->pos])
+    {
+    case '=':
+        if (lex->pos + 1 < lex->len && lex->data[lex->pos + 1] == '=')
+        {
+            lex->pos += 2;
+            tkn->len = 2;
+        }
+        else
+        {
+            lex->pos += 1;
+            tkn->len = 1;
+        }
+        tkn->type = TT_EQ_OP;
+        return 1;
+    case '!':
+        if (lex->pos + 1 < lex->len && lex->data[lex->pos + 1] != '=')
+        {
+            lex->pos += 1;
+            tkn->len = 1;
+            tkn->type = TT_INVALID;
+            return 1;
+        }
+        lex->pos += 2;
+        tkn->len = 2;
+        tkn->type = TT_N_EQ_OP;
+        return 1;
+    case '>':
+        if (lex->pos + 1 < lex->len && lex->data[lex->pos + 1] == '=')
+        {
+            lex->pos += 2;
+            tkn->len = 2;
+            tkn->type = TT_EQ_GR_OP;
+        }
+        else
+        {
+            lex->pos += 1;
+            tkn->len = 1;
+            tkn->type = TT_GR_OP;
+        }
+        return 1;
+    case '<':
+        if (lex->pos + 1 < lex->len && lex->data[lex->pos + 1] == '=')
+        {
+            lex->pos += 2;
+            tkn->len = 2;
+            tkn->type = TT_EQ_LE_OP;
+        }
+        else
+        {
+            lex->pos += 1;
+            tkn->len = 1;
+            tkn->type = TT_LE_OP;
+        }
+        return 1;
+    case '%':
+        lex->pos += 1;
+        tkn->len = 1;
+        tkn->type = TT_MOD_OP;
+        return 1;
+    default:
+        return 0;
+    }
+    return 0;
+}
+
+static bool lexer_next_token_string(token* tkn, lexer* lex)
+{
+    size_t string_len = 0;
+
+    if (lex->data[lex->pos] != '\"')
+    {
+        return 0;
     }
 
-    if (is_string_type_supported(item_type))
+    tkn->str = lex->data + lex->pos;
+    string_len++;
+
+    while (lex->pos + string_len < lex->len && lex->data[lex->pos + string_len] != '"')
     {
-        if (data[(*pos)] != '\"')
-        {
-            ereport(ERROR, (errmsg("incorrect predicate syntax"),
-                            errdetail("Double quotes were expected.")));
-        }
-        
-        (*pos)++;
-        while ((*pos) + item_len < len && data[(*pos) + item_len] != '"')
-	    {
-		    item_len++;
-	    }
-        if ((*pos) + item_len >= len)
-        {
-            ereport(ERROR, (errmsg("incorrect predicate syntax"),
-                            errdetail("Expected the end of the string (\"), but reached the end of the expression.")));
-        }
-
-        buf = (char*)palloc(sizeof(char)*(item_len+1));
-        memcpy(buf, data + (*pos), item_len*sizeof(char));
-        buf[item_len] = '\0';
-
-        switch (item_type) {
-        case TEXTOID:
-            item = DirectFunctionCall1(textin, CStringGetDatum(buf));
-            break;
-
-        case VARCHAROID:
-            item = DirectFunctionCall1(textin, CStringGetDatum(buf));
-            break;
-
-        case BPCHAROID:
-            item = DirectFunctionCall3(bpcharin, CStringGetDatum(buf), ObjectIdGetDatum(BPCHAROID), Int32GetDatum(-1));
-            break;
-        default:
-            pfree(buf);
-            ereport(ERROR, (errmsg("incorrect predicate syntax"),
-                            errdetail("Array element type %s is not a supported string type.",
-                                format_type_be(item_type))));
-        }
-
-        (*pos) += item_len + 1;
-
-        pfree(buf);
+        string_len++;
     }
-    else if (is_numeric_type_supported(item_type))
+
+    if (lex->pos + string_len >= lex->len)
     {
-        
-        if ((*pos) + item_len < len && data[(*pos) + item_len] == '-')
-        {
-            item_len++;
-        }
-        
-        while ((*pos) + item_len < len &&
-            ((data[(*pos) + item_len] >= '0' && data[(*pos) + item_len] <= '9') ||
-            data[(*pos) + item_len] == '.'))
-        {
-            if (data[(*pos) + item_len] == '.')
-            {
-                if (is_float)
-                {
-                    ereport(ERROR, (errmsg("incorrect predicate syntax"),
-                                    errdetail("A numeric constant cannot contain more than one decimal point.")));
-                }
-                is_float = 1;
-            }
-            item_len++;
-        }
+        return 0;
+    }
 
-        if (item_len == 0)
-        {
-            ereport(ERROR, (errmsg("incorrect predicate syntax"),
-                            errdetail("Expected a numeric value.")));
-        }
+    string_len++;
 
-        if (item_len == 1 && data[(*pos)] == '-')
-        {
-            ereport(ERROR, (errmsg("incorrect predicate syntax"),
-                            errdetail("Expected a numeric value.")));
-        }
+    tkn->str = lex->data + lex->pos;
+    tkn->len = string_len;
+    tkn->type = TT_STRING;
 
-        if (is_float && (item_type == INT2OID || item_type == INT4OID || item_type == INT8OID))
-        {
-            ereport(ERROR, (errmsg("incorrect predicate syntax"),
-                            errdetail("Cannot compare an integer array with a floating-point value.")));
-        }
+    lex->pos += string_len;
 
-        buf = (char*)palloc(sizeof(char)*(item_len+1));
-        memcpy(buf, data + (*pos), item_len*sizeof(char));
-        buf[item_len] = '\0';
+    return 1;
+}
 
-            switch (item_type)
-            {
-            case INT2OID:
-                item = Int16GetDatum((int16) pg_strtoint16(buf));
-                break;
-            case INT4OID:
-                item = Int32GetDatum((int32) pg_strtoint32(buf));
-                break;
-            case INT8OID:
-                item = Int64GetDatum((int64) pg_strtoint64(buf));
-                break;
-            case FLOAT4OID:
-                item = DirectFunctionCall1(float4in, CStringGetDatum(buf));
-                break;
-            case FLOAT8OID:
-                item = DirectFunctionCall1(float8in, CStringGetDatum(buf));
-                break;
-            case NUMERICOID: 
-                item = DirectFunctionCall3(numeric_in, CStringGetDatum(buf), ObjectIdGetDatum(NUMERICOID), Int32GetDatum(-1));
-                break;
-            default:
-                pfree(buf);
-                ereport(ERROR, (errmsg("incorrect predicate syntax"),
-                            errdetail("Array element type %s is not a supported numeric type.",
-                                format_type_be(item_type))));
-            }
+static bool lexer_next_token_numeric(token* tkn, lexer* lex)
+{
+    size_t numeric_len = 0;
+    bool has_digits = false;
+    size_t first_digit = 0;
 
-        (*pos) += item_len;
+    if (lex->data[lex->pos] == '-') {
+        first_digit = 1;
+        numeric_len = 1;
+    }
 
-        pfree(buf);
+    if (lex->pos + numeric_len >= lex->len)
+    {
+        return 0;
+    }
+
+    while (lex->pos + numeric_len < lex->len &&
+            lex->data[lex->pos + numeric_len] >= '0' && lex->data[lex->pos + numeric_len] <= '9')
+    {
+        numeric_len++;
+        has_digits = 1;
+    }
+
+    if (numeric_len - first_digit > 1 && lex->data[lex->pos + first_digit] == '0')
+    {
+        return 0;
+    }
+
+    if (lex->pos + numeric_len < lex->len && lex->data[lex->pos + numeric_len] == '.')
+    {
+        numeric_len++;
     }
     else
     {
-        ereport(ERROR, (errmsg("incorrect predicate syntax"),
-                            errdetail("Array element type %s is not supported.",
-                                format_type_be(item_type))));
+        if (!has_digits)
+        {
+            return 0;
+        }
+
+        tkn->len = numeric_len;
+        tkn->str = lex->data + lex->pos;
+        tkn->type = TT_INT;
+
+        lex->pos += numeric_len;
+
+        return 1;
     }
 
+    while (lex->pos + numeric_len < lex->len &&
+            lex->data[lex->pos + numeric_len] >= '0' && lex->data[lex->pos + numeric_len] <= '9')
+    {
+        numeric_len++;
+        has_digits = 1;
+    }
+
+    if (!has_digits)
+    {
+        return 0;
+    }
+
+    tkn->len = numeric_len;
+    tkn->str = lex->data + lex->pos;
+    tkn->type = TT_NUM;
+
+    lex->pos += numeric_len;
+
+    return 1;
+}
+
+static bool lexer_next_token_identifier(token* tkn, lexer* lex)
+{
+    size_t ident_len = 0;
+
+    while (lex->pos + ident_len < lex->len &&
+            lex->data[lex->pos + ident_len] >= 'a' && lex->data[lex->pos + ident_len] <= 'z')
+    {
+        ident_len++;
+    }
+
+    if (ident_len == 0)
+    {
+        return 0;
+    }
+
+    tkn->str = lex->data + lex->pos;
+    tkn->len = ident_len;
+    tkn->type = TT_IDENT;
+
+    lex->pos += ident_len;
+
+    return 1;
+}
+
+static token lexer_next_token(lexer *lex) {
+    token result;
+    char ch;
+
+    lexer_skip_whitespace(lex);
+
+    if (lex->pos >= lex->len)
+    {
+        result.str = lex->data + lex->pos;
+        result.len = 0;
+        result.type = TT_EOF;
+        
+        return result;
+    }
+
+    if (lexer_next_token_operation(&result, lex))
+    {
+        return result;
+    }
+
+    if (lexer_next_token_string(&result, lex))
+    {
+        return result;
+    }
+
+    if (lexer_next_token_numeric(&result, lex))
+    {
+        return result;
+    }
+
+    if (lexer_next_token_identifier(&result, lex))
+    {
+        return result;
+    }
+
+    result.str = lex->data + lex->pos;
+    result.type = TT_INVALID;
+    result.len = 0;
+    while (lex->pos < lex->len)
+    {
+        ch = lex->data[lex->pos];
+        if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r')
+        {
+            break;
+        }
+        else
+        {
+            result.len++;
+            lex->pos++;
+        }
+    }
+
+    return result;
+}
+
+static Datum datum_from_token(token tkn, Oid target_type)
+{
+    Datum item;
+    char *buf;
+
+    if (tkn.type != TT_STRING && is_string_type_supported(target_type))
+    {
+        ereport(ERROR, (errmsg("incorrect predicate syntax"),
+                        errdetail("Expected a string value, got %.*s", tkn.len, tkn.str)));
+    }
+
+    if (tkn.type != TT_INT && is_int_type_supported(target_type))
+    {
+        ereport(ERROR, (errmsg("incorrect predicate syntax"),
+                        errdetail("Expected an integer value, got %.*s", tkn.len, tkn.str)));
+    }
+
+    if (tkn.type != TT_INT && tkn.type != TT_NUM && is_numeric_type_supported(target_type))
+    {
+        ereport(ERROR, (errmsg("incorrect predicate syntax"),
+                        errdetail("Expected a numeric value, got %.*s", tkn.len, tkn.str)));
+    }
+
+    buf = (char*)palloc(sizeof(char)*(tkn.len+1));
+    memcpy(buf, tkn.str, tkn.len*sizeof(char));
+    buf[tkn.len] = '\0';
+
+    switch (target_type)
+    {
+    case TEXTOID:
+        buf[tkn.len - 1] = '\0';
+        item = DirectFunctionCall1(textin, CStringGetDatum(buf + 1));
+        break;
+
+    case VARCHAROID:
+        buf[tkn.len - 1] = '\0';
+        item = DirectFunctionCall1(textin, CStringGetDatum(buf + 1));
+        break;
+
+    case BPCHAROID:
+        buf[tkn.len - 1] = '\0';
+        item = DirectFunctionCall3(bpcharin, CStringGetDatum(buf + 1), ObjectIdGetDatum(BPCHAROID), Int32GetDatum(-1));
+        break;
+    
+    case INT2OID:
+        item = Int16GetDatum((int16) pg_strtoint16(buf));
+        break;
+
+    case INT4OID:
+        item = Int32GetDatum((int32) pg_strtoint32(buf));
+        break;
+
+    case INT8OID:
+        item = Int64GetDatum((int64) pg_strtoint64(buf));
+        break;
+
+    case FLOAT4OID:
+        item = DirectFunctionCall1(float4in, CStringGetDatum(buf));
+        break;
+
+    case FLOAT8OID:
+        item = DirectFunctionCall1(float8in, CStringGetDatum(buf));
+        break;
+
+    case NUMERICOID: 
+        item = DirectFunctionCall3(numeric_in, CStringGetDatum(buf), ObjectIdGetDatum(NUMERICOID), Int32GetDatum(-1));
+        break;
+    
+    default:
+        pfree(buf);
+        ereport(ERROR, (errmsg("incorrect predicate syntax"),
+                errdetail("Array element type %s is not supported.",
+                    format_type_be(target_type))));
+    }
+
+    pfree(buf);
     return item;
 }
 
-static predicate_op parse_operation(const char *data, int len, int* pos)
-{
-    if ((*pos) >= len)
-    {
-        ereport(ERROR, (errmsg("incorrect predicate syntax"),
-                            errdetail("Expected an operation, but reached the end of the expression.")));
-    }
-    switch (data[(*pos)])
-    {
-    case '=':
-        if ((*pos) + 1 < len && data[(*pos) + 1] == '=')
-        {
-            (*pos)++;
-        }
-        (*pos)++;
-        return EQ_OP;
-    case '!':
-        if (((*pos) + 1 >= len) || (data[(*pos) + 1] != '='))
-        {
-            ereport(ERROR, (errmsg("incorrect predicate syntax"),
-                            errdetail("Unsupported operation.")));
-        }
-        (*pos)+=2;
-        return N_EQ_OP;
-    case '>':
-        if ((*pos) + 1 < len && data[(*pos) + 1] == '=')
-        {
-            (*pos)+=2;
-            return EQ_GR_OP;
-        }
-        (*pos)++;
-        return GR_OP;
-    case '<':
-        if ((*pos) + 1 < len && data[(*pos) + 1] == '=')
-        {
-            (*pos)+=2;
-            return EQ_LE_OP;
-        }
-        (*pos)++;
-        return LE_OP;
-    case '%':
-        (*pos)++;
-        return MOD_OP;
-    default:
-        ereport(ERROR, (errmsg("incorrect predicate syntax"),
-                            errdetail("Unsupported operation.")));
-    }
-    ereport(ERROR, (errmsg("incorrect predicate syntax"),
-                            errdetail("Unsupported operation.")));
-}
-
-static predicate parse_predicate(const char *data, int len, Oid item_type)
+static predicate parse_predicate(const char *data, int len, Oid target_type)
 {
     predicate pred;
-    bool any_val = 0;
-    int pos = 0;
+    token curr_tkn;
+    lexer lex;
 
-    pred.obj_type = item_type;
+    pred.obj_type = target_type;
 
-    while (pos < len && data[pos] == ' ')
-    {
-        pos++;
-    }
-    if (pos >= len)
+    lexer_init(&lex, data, len);
+    
+    curr_tkn = lexer_next_token(&lex);
+    
+    if (curr_tkn.type == TT_EOF)
     {
         pred.op = NONE_OP;
         return pred;
     }
 
-    while (pos < len && data[pos] >= 'a' && data[pos] <= 'z')
-    {
-        any_val = 1;
-        pos++;
-    }
-
-    if (!any_val)
+    if (curr_tkn.type != TT_IDENT)
     {
         ereport(ERROR, (errmsg("incorrect predicate syntax"),
                         errdetail("Expected a variable name.")));
     }
 
-    while (pos < len && data[pos] == ' ')
+    curr_tkn = lexer_next_token(&lex);
+
+    switch (curr_tkn.type)
     {
-        pos++;
-    }
-    if (pos >= len)
-    {
+    case TT_EQ_OP:
+        pred.op = EQ_OP;
+        break;
+    case TT_N_EQ_OP:
+        pred.op = N_EQ_OP;
+        break;
+    case TT_LE_OP:
+        pred.op = LE_OP;
+        break;
+    case TT_EQ_LE_OP:
+        pred.op = EQ_LE_OP;
+        break;
+    case TT_GR_OP:
+        pred.op = GR_OP;
+        break;
+    case TT_EQ_GR_OP:
+        pred.op = EQ_GR_OP;
+        break;
+    case TT_MOD_OP:
+        pred.op = MOD_OP;
+        break;
+    case TT_EOF:
         ereport(ERROR, (errmsg("incorrect predicate syntax"),
                         errdetail("Expected an operation, but reached the end of the expression.")));
+        break;
+    default:
+        ereport(ERROR, (errmsg("incorrect predicate syntax"),
+                        errdetail("Expected an operation, got %.*s", curr_tkn.len, curr_tkn.str)));
     }
 
-    pred.op = parse_operation(data, len, &pos);
-
-    if (is_string_type_supported(item_type) &&
-        !(pred.op == EQ_OP || pred.op == N_EQ_OP))
+    if (is_string_type_supported(target_type) && pred.op != EQ_OP && pred.op != N_EQ_OP)
     {
         ereport(ERROR, (errmsg("incorrect predicate syntax"),
                         errdetail("String types support equality operators only.")));
     }
     
-    if (pred.op == MOD_OP &&
-        !is_int_type_supported(item_type))
+    if (pred.op == MOD_OP && !is_int_type_supported(target_type))
     {
         ereport(ERROR, (errmsg("incorrect predicate syntax"),
                         errdetail("Operator '%%' can only be used with integer array types.")));
     }
 
+    curr_tkn = lexer_next_token(&lex);
 
-    while (pos < len && data[pos] == ' ')
-    {
-        pos++;
-    }
-    if (pos >= len)
+    if (curr_tkn.type == TT_EOF)
     {
         ereport(ERROR, (errmsg("incorrect predicate syntax"),
                         errdetail("Expected a constant value, but reached the end of the expression.")));
     }
 
-    pred.obj1 = parse_item(data, len, &pos, item_type);
-    
-    while (pos < len && data[pos] == ' ')
-    {
-        pos++;
-    }
+    pred.obj1 = datum_from_token(curr_tkn, target_type);
 
-    if (pos >= len)
+    curr_tkn = lexer_next_token(&lex);
+
+    if (curr_tkn.type == TT_EOF)
     {
         if (pred.op != MOD_OP)
         {
@@ -415,31 +609,26 @@ static predicate parse_predicate(const char *data, int len, Oid item_type)
         ereport(ERROR, (errmsg("incorrect predicate syntax"),
                         errdetail("Expected the end of the expression.")));
     }
-    if (data[pos] != '=')
+
+    if (curr_tkn.type != TT_EQ_OP)
     {
         ereport(ERROR, (errmsg("incorrect predicate syntax"),
                         errdetail("Expected '=' operator.")));
     }
 
-    pos++;
+    curr_tkn = lexer_next_token(&lex);
 
-    while (pos < len && data[pos] == ' ')
-    {
-        pos++;
-    }
-    if (pos >= len)
+    if (curr_tkn.type == TT_EOF)
     {
         ereport(ERROR, (errmsg("incorrect predicate syntax"),
-                        errdetail("Expected a constant value after '=', but reached the end of the expression.")));
+                        errdetail("Expected a constant value, but reached the end of the expression.")));
     }
 
-    pred.obj2 = parse_item(data, len, &pos, item_type);
+    pred.obj2 = datum_from_token(curr_tkn, target_type);
 
-    while (pos < len && data[pos] == ' ')
-    {
-        pos++;
-    }
-    if (pos < len)
+    curr_tkn = lexer_next_token(&lex);
+
+    if (curr_tkn.type != TT_EOF)
     {
         ereport(ERROR, (errmsg("incorrect predicate syntax"),
                         errdetail("Expected the end of the expression.")));
